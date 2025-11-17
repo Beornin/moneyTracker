@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Transactions | {{ current_month_name }}</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    
+    <!-- NEW: Font Awesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" xintegrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
+
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-6 border-b dark:border-gray-700 pb-2">
+            <i class="fa-solid fa-pen-to-square mr-3 text-gray-700 dark:text-gray-300"></i><span class="align-middle">Edit Transactions</span>
+        </h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="space-y-2 mb-6">
+                    {% for category, message in messages %}
+                        <div class="p-3 text-sm rounded-lg flex items-center
+                            {% if category == 'success' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% else %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% endif %}">
+                            <i class="fa-solid {% if category == 'success' %}fa-check-circle{% else %}fa-exclamation-triangle{% endif %} mr-3 w-5 h-5"></i>
+                            <span>{{ message|safe }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="flex flex-wrap items-center justify-between mb-6 p-4 bg-white dark:bg-gray-800 rounded-xl shadow-lg">
+            
+            <a href="{{ url_for('index', month_offset=month_offset) }}" class="flex items-center text-sm font-medium px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
+                <i class="fa-solid fa-arrow-left mr-2"></i>
+                Back to Dashboard
+            </a>
+
+            <div class="flex items-center space-x-4">
+                <a href="{{ url_for('edit_transactions', month_offset=month_offset - 1) }}" class="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition duration-150">
+                    <i class="fa-solid fa-chevron-left mr-1"></i> Previous
+                </a>
+                <span class="text-xl font-bold text-indigo-600 dark:text-indigo-400">{{ current_month_name }}</span>
+                <a href="{{ url_for('edit_transactions', month_offset=month_offset + 1) }}" class="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition duration-150">
+                    Next <i class="fa-solid fa-chevron-right ml-1"></i>
+                </a>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-gray-800 shadow-xl overflow-hidden rounded-lg">
+            {% if transactions %}
+            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <i class="fa-solid fa-trash-can w-4" title="Delete?"></i>
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <i class="fa-solid fa-calendar-days w-4 mr-1"></i>Date
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <i class="fa-solid fa-file-lines w-4 mr-1"></i>Description
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <i class="fa-solid fa-dollar-sign w-4 mr-1"></i>Amount
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <i class="fa-solid fa-tag w-4 mr-1"></i>Category
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <i class="fa-solid fa-landmark w-4 mr-1"></i>Account
+                        </th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <i class="fa-solid fa-bolt w-4 mr-1"></i>Actions
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    {% for t in transactions %}
+                    <tr class="hover:bg-indigo-50 dark:hover:bg-indigo-900 transition duration-100 {% if t.is_deleted %}opacity-40 bg-gray-50 dark:bg-gray-900{% endif %}">
+                        
+                        <!-- 1. Checkbox Column -->
+                        <td class="px-4 py-2 whitespace-nowrap text-center">
+                            <input type="checkbox" 
+                                   name="is_deleted" 
+                                   value="true" 
+                                   form="form-{{ t.id }}"
+                                   {% if t.is_deleted %}checked{% endif %}
+                                   class="w-4 h-4 text-red-600 bg-gray-100 border-gray-300 rounded focus:ring-red-500 dark:focus:ring-red-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600">
+                        </td>
+                
+                        <!-- 2. Date Column -->
+                        <td class="px-4 py-2 whitespace-nowrap">
+                            <input type="date" 
+                                   name="date" 
+                                   value="{{ t.date.strftime('%Y-%m-%d') }}" 
+                                   required 
+                                   form="form-{{ t.id }}"
+                                   class="border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm p-1 w-32">
+                        </td>
+                
+                        <!-- 3. Description Column -->
+                        <td class="px-4 py-2 whitespace-nowrap">
+                            <input type="text" 
+                                   name="description" 
+                                   value="{{ t.description }}" 
+                                   required 
+                                   form="form-{{ t.id }}"
+                                   class="w-full min-w-[200px] border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm p-1">
+                        </td>
+                
+                        <!-- 4. Amount Column -->
+                        <td class="px-4 py-2 whitespace-nowrap">
+                            <input type="text" 
+                                   name="amount" 
+                                   value="{{ '%.2f'|format(t.amount | float) }}" 
+                                   required 
+                                   form="form-{{ t.id }}"
+                                   class="w-24 text-right border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm p-1">
+                        </td>
+                
+                        <!-- 5. Category Column (Updated Width) -->
+                        <td class="px-4 py-2 whitespace-nowrap">
+                            <select name="category_id" 
+                                    form="form-{{ t.id }}"
+                                    class="w-auto min-w-[180px] max-w-[300px] border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm p-1">
+                                {% for group_name, categories in grouped_categories.items() %}
+                                    <optgroup label="{{ group_name }}" class="dark:bg-gray-800">
+                                        {% for cat in categories %}
+                                            <option value="{{ cat.id }}" {% if cat.id | string == t.category_id | string %}selected{% endif %}>
+                                                {{ cat.name }}
+                                            </option>
+                                        {% endfor %}
+                                    </optgroup>
+                                {% endfor %}
+                            </select>
+                        </td>
+                
+                        <!-- 6. Account Column -->
+                        <td class="px-4 py-2 whitespace-nowrap">
+                            <select name="account_id" 
+                                    form="form-{{ t.id }}"
+                                    class="w-auto min-w-[200px] max-w-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm p-1">
+                                {% for acc in accounts %}
+                                    <option value="{{ acc.id }}" {% if acc.id | string == t.account_id | string %}selected{% endif %}>
+                                        {{ acc.name }} ({{ acc.account_type.replace('_', ' ').title() }})
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                
+                        <!-- 7. Actions Column -->
+                        <td class="px-4 py-2 whitespace-nowrap text-right text-sm font-medium">
+                            <!-- HIDDEN FORM DEFINITION -->
+                            <form id="form-{{ t.id }}" action="{{ url_for('update_transaction', t_id=t.id) }}" method="POST">
+                                <input type="hidden" name="month_offset" value="{{ month_offset }}">
+                            </form>
+                
+                            <div class="flex flex-col items-end justify-center h-full">
+                                <button type="submit" 
+                                        form="form-{{ t.id }}"
+                                        class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-200 px-4 py-2 border border-indigo-200 dark:border-indigo-700 rounded-md hover:bg-indigo-50 dark:hover:bg-indigo-900 transition duration-150 shadow-sm flex items-center">
+                                    <i class="fa-solid fa-save mr-2"></i>
+                                    Save
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="text-center py-20 text-gray-500 dark:text-gray-400">
+                <i class="fa-solid fa-folder-open fa-2x mb-3"></i>
+                <p>No transactions found for {{ current_month_name }}.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</body>
+</html>

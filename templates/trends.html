@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trend Analysis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    
+    <!-- NEW: Font Awesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" xintegrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+    <script>
+        tailwind.config = { darkMode: 'class' }
+    </script>
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+    <style>
+        /* Custom scrollbar for category list */
+        .category-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        .category-list::-webkit-scrollbar-track {
+            background: #f1f5f9; /* gray-100 */
+        }
+        .dark .category-list::-webkit-scrollbar-track {
+            background: #1f2937; /* gray-800 */
+        }
+        .category-list::-webkit-scrollbar-thumb {
+            background: #94a3b8; /* gray-400 */
+            border-radius: 3px;
+        }
+        .dark .category-list::-webkit-scrollbar-thumb {
+            background: #4b5563; /* gray-600 */
+        }
+
+        /* Loading Spinner */
+        #loading-spinner {
+            border: 5px solid #f3f3f3; /* Light grey */
+            border-top: 5px solid #3b82f6; /* Blue */
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 font-sans leading-normal tracking-normal min-h-screen transition-colors duration-200">
+
+    <!-- Main Container -->
+    <div class="flex flex-col md:flex-row h-screen">
+        
+        <!-- Sidebar / Control Panel -->
+        <div class="w-full md:w-80 lg:w-96 bg-white dark:bg-gray-800 shadow-lg p-6 flex-shrink-0 overflow-y-auto" style="max-height: 100vh;">
+            <h1 class="text-2xl font-extrabold text-gray-900 dark:text-white mb-2">
+                <i class="fa-solid fa-chart-line mr-2 text-purple-600 dark:text-purple-400"></i>Trend Analysis
+            </h1>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Select categories and options to plot.</p>
+            
+            <a href="{{ url_for('index') }}" class="inline-block text-sm font-medium mb-6 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
+                <i class="fa-solid fa-arrow-left mr-2"></i>Back to Dashboard
+            </a>
+
+            <!-- Form Controls -->
+            <form id="trends-form" class="space-y-6">
+                <!-- 1. Date Range -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <i class="fa-solid fa-calendar-days w-4 mr-1"></i>Date Range
+                    </label>
+                    <div class="flex space-x-2">
+                        <input type="date" id="start-date" name="start_date" required class="w-1/2 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg shadow-sm text-sm">
+                        <input type="date" id="end-date" name="end_date" required class="w-1/2 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg shadow-sm text-sm">
+                    </div>
+                </div>
+
+                <!-- 2. Time Bucket -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <i class="fa-solid fa-chart-pie w-4 mr-1"></i>Breakdown
+                    </label>
+                    <div class="flex items-center space-x-4">
+                        <label class="flex items-center">
+                            <input type="radio" name="time_bucket" value="month" checked class="text-blue-600 dark:bg-gray-700 dark:border-gray-600">
+                            <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Monthly</span>
+                        </label>
+                        <label class="flex items-center">
+                            <input type="radio" name="time_bucket" value="week" class="text-blue-600 dark:bg-gray-700 dark:border-gray-600">
+                            <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Weekly</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 3. Category Selection -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <i class="fa-solid fa-tags w-4 mr-1"></i>Categories
+                    </label>
+                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-64 overflow-y-auto category-list space-y-3">
+                        {% for group_name, categories in grouped_categories.items() %}
+                            {% if group_name.lower() != 'transfers' %} <!-- Exclude Transfers Group -->
+                            <div>
+                                <h4 class="font-semibold text-gray-800 dark:text-gray-200 text-sm mb-1">{{ group_name }}</h4>
+                                <div class="space-y-1 pl-2">
+                                    {% for cat in categories %}
+                                    <label class="flex items-center cursor-pointer">
+                                        <input type="checkbox" name="category_ids" value="{{ cat.id }}" class="h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded">
+                                        <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">{{ cat.name }}</span>
+                                    </label>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- 4. Event Selection -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <i class="fa-solid fa-calendar-star w-4 mr-1"></i>Events to Display
+                    </label>
+                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-48 overflow-y-auto category-list space-y-2">
+                        {% if all_events %}
+                            <!-- Events are pre-sorted by date desc in the route -->
+                            {% for event in all_events %}
+                            <label class="flex items-center cursor-pointer">
+                                <input type="checkbox" name="event_ids" value="{{ event.id }}" class="h-4 w-4 text-pink-600 border-gray-300 dark:border-gray-600 rounded">
+                                <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                                    {{ event.description }} <span class="text-xs text-gray-500">({{ event.date.strftime('%Y-%m-%d') }})</span>
+                                </span>
+                            </label>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-sm text-gray-500 dark:text-gray-400 text-center p-4">
+                                No events found. Add some from the <a href="{{ url_for('events') }}" class="text-pink-500 hover:underline">Dates of Interest</a> page.
+                            </p>
+                        {% endif %}
+                    </div>
+                </div>
+
+
+                <!-- 5. Submit Button -->
+                <button type="submit" id="generate-chart" class="w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-150 shadow-md flex items-center justify-center">
+                    <i class="fa-solid fa-magnifying-glass-chart mr-2"></i>
+                    Generate Chart
+                </button>
+            </form>
+        </div>
+
+        <!-- Main Content / Chart Area -->
+        <div class="flex-grow p-6 md:p-10 overflow-y-auto h-screen">
+            <div id="chart-container" class="w-full h-[90vh] min-h-[500px] bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4">
+                <div id="loading-spinner-container" class="h-full w-full flex-col hidden items-center justify-center text-center">
+                    <div id="loading-spinner"></div>
+                    <p class="mt-4 text-lg font-medium text-gray-700 dark:text-gray-300">Fetching data...</p>
+                </div>
+                <div id="chart-placeholder" class="h-full w-full flex items-center justify-center text-center">
+                    <p class="text-xl text-gray-500 dark:text-gray-400">Please select your options and click "Generate Chart".</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('trends-form');
+            const chartContainer = document.getElementById('chart-container');
+            const chartPlaceholder = document.getElementById('chart-placeholder');
+            const loadingSpinner = document.getElementById('loading-spinner-container');
+            const endDateInput = document.getElementById('end-date');
+            const startDateInput = document.getElementById('start-date');
+
+            // Set default dates (past 1 year)
+            const today = new Date();
+            const oneYearAgo = new Date();
+            oneYearAgo.setFullYear(today.getFullYear() - 1);
+            
+            endDateInput.value = today.toISOString().split('T')[0];
+            startDateInput.value = oneYearAgo.toISOString().split('T')[0];
+
+            // Handle form submission
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                // 1. Get form data
+                const formData = new FormData(form);
+                const categoryIds = formData.getAll('category_ids');
+                const eventIds = formData.getAll('event_ids'); // Get selected event IDs
+                const timeBucket = formData.get('time_bucket');
+                const startDate = formData.get('start_date');
+                const endDate = formData.get('end_date');
+
+                if (categoryIds.length === 0) {
+                    alert('Please select at least one category.');
+                    return;
+                }
+                
+                if (!startDate || !endDate) {
+                    alert('Please select a start and end date.');
+                    return;
+                }
+
+                // 2. Show loading spinner
+                chartPlaceholder.classList.add('hidden');
+                loadingSpinner.classList.remove('hidden');
+
+                try {
+                    // 3. Fetch data from the API
+                    const response = await fetch("{{ url_for('get_trend_data') }}", {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            category_ids: categoryIds,
+                            event_ids: eventIds, // Send event IDs to the API
+                            start_date: startDate,
+                            end_date: endDate,
+                            time_bucket: timeBucket
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Server error: ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+
+                    // 4. Render the chart
+                    if (result.plot_data && result.plot_data.length > 0) {
+                        const isDarkMode = document.documentElement.classList.contains('dark');
+                        const layout = {
+                            title: `Spending Trends by ${timeBucket.charAt(0).toUpperCase() + timeBucket.slice(1)}`,
+                            barmode: 'stack',
+                            xaxis: { 
+                                title: 'Date', 
+                                tickformat: '%Y-%m-%d',
+                                rangeslider: { visible: true } 
+                            },
+                            yaxis: { 
+                                title: 'Amount ($)',
+                                tickformat: '$,.0f' // Force $ sign, comma, and 0 decimals
+                            },
+                            paper_bgcolor: isDarkMode ? '#1f2937' : '#ffffff', // gray-800 or white
+                            plot_bgcolor: isDarkMode ? '#1f2937' : '#ffffff',
+                            font: {
+                                color: isDarkMode ? '#d1d5db' : '#111827' // gray-300 or gray-900
+                            },
+                            legend: {
+                                orientation: 'h',
+                                y: -0.2,
+                                x: 0.5,
+                                xanchor: 'center'
+                            },
+                            margin: { t: 50, b: 150, l: 80, r: 40 },
+                            // Add event lines (shapes) and annotations
+                            shapes: result.layout_shapes,
+                            annotations: result.layout_annotations
+                        };
+
+                        Plotly.newPlot(chartContainer, result.plot_data, layout, { responsive: true });
+                    } else {
+                        chartPlaceholder.innerHTML = '<p class="text-xl text-gray-500 dark:text-gray-400">No data found for the selected criteria.</p>';
+                        chartPlaceholder.classList.remove('hidden');
+                        Plotly.purge(chartContainer); // Clear previous chart
+                    }
+
+                } catch (error) {
+                    console.error('Error fetching chart data:', error);
+                    chartPlaceholder.innerHTML = `<p class="text-xl text-red-500 dark:text-red-400">Error loading chart: ${error.message}</p>`;
+                    chartPlaceholder.classList.remove('hidden');
+                } finally {
+                    // 5. Hide loading spinner
+                    loadingSpinner.classList.add('hidden');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
