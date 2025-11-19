@@ -1,114 +1,148 @@
-Python Budgeting App with Postgres & Flask
+# Personal Finance Dashboard
 
-This is a personal budgeting application designed to run on your local desktop. It uses a Flask (Python) backend, a PostgreSQL database for storage, and Plotly for interactive charts.
+A robust, locally-hosted personal finance application built with **Flask**, **PostgreSQL**, **SQLAlchemy**, and **Plotly**. This dashboard is designed to track not just "spending," but total **liquidity, cash flow, and wealth retention** across checking, savings, and investment accounts.
 
-Features
+## 🚀 Features
 
-Web Interface: Access your dashboard from a local URL (http://127.0.0.1:5000).
+* **Multi-Source Import:** Parse **Chase PDF Statements** and generic CSVs automatically.
+* **Smart Categorization:** Regex-based rules engine with "Bulk Force Apply" to retroactively fix history.
+* **Double-Entry Logic:** Handles internal transfers (Checking ↔ Savings) without double-counting them as expenses.
+* **Strategic Exclusion:** Automatically ignores Credit Card Payments to prevent "double-grossing" outflows.
+* **Interactive Charts:** Plotly-based visualizations with time-travel sliders and zoom capabilities.
+* **AI Insights:** (Optional) Integration with Google Gemini to analyze monthly trends.
 
-Account Management: Create different account types (Checking, Savings, Credit Card).
+---
 
-CSV Ingestion: Upload transaction CSVs from your bank and assign them to an account.
+## 🛠️ Installation & Setup
 
-Transfer Handling: Internal transfers (e.g., Savings to Checking) are filtered out of income/expense reports to prevent inflated totals.
+### 1. Prerequisites
+* Python 3.10+
+* PostgreSQL (Local or Remote)
 
-Interactive Dashboard:
+### 2. Environment Variables
+Create a `.env` file in the root directory:
 
-Income vs. Expense Over Time (Transfers Excluded)
+```ini
+# Database Connection (PostgreSQL)
+DATABASE_URL=postgresql://username:password@localhost:5432/budget_db
 
-Expense by Category Pie Chart (Transfers Excluded)
+# Optional: For AI Summaries (Leave blank if not using)
+GEMINI_API_KEY=your_google_api_key_here
+````
 
-Net Worth Over Time (Transfers Included for accurate balance tracking)
+### 3\. Install Dependencies
 
-Year-over-Year Monthly Expense Comparison (Transfers Excluded)
-
-Setup Instructions
-
-Step 1: Set up the PostgreSQL Database
-
-Install PostgreSQL: If you don't already have it, download and install PostgreSQL for your operating system.
-
-Create a User (Optional but Recommended):
-
-Open the psql shell or your preferred Postgres management tool.
-
-CREATE USER budget_user WITH PASSWORD 'your_secure_password_here';
-
-Create the Database:
-
-CREATE DATABASE budget_db;
-
-Grant Privileges:
-
-GRANT ALL PRIVILEGES ON DATABASE budget_db TO budget_user;
-
-\q to quit.
-
-Step 2: Set up the Python Environment
-
-Create a Virtual Environment:
-
-Open your terminal in this project's directory.
-
-python -m venv venv
-
-Activate it:
-
-macOS/Linux: source venv/bin/activate
-
-Windows: .\venv\Scripts\activate
-
-Install Dependencies:
-
+```bash
 pip install -r requirements.txt
+```
 
-Step 3: Configure the Application
+### 4\. Initialize Database
 
-Edit app.py:
+The application automatically checks for tables on startup. If they don't exist, it creates them and seeds default categories.
 
-Open the app.py file.
+1.  Create the database in Postgres: `CREATE DATABASE budget_db;`
+2.  Run the app once to generate tables.
 
-Find the line starting with app.config['SQLALCHEMY_DATABASE_URI'].
+### 5\. Run the Application
 
-Update the connection string with your Postgres user, password, and database name from Step 1.
-
-Example: postgresql://budget_user:your_secure_password_here@localhost:5432/budget_db
-
-Customize CSV Parsing (CRITICAL!):
-
-Find the /upload route in app.py (around line 240).
-
-Look for the comment block ### START CUSTOM CSV PARSING LOGIC ###.
-
-You MUST adapt the column_map to match the exact headers in the CSV files exported from your bank.
-
-Example of a necessary change if your CSV uses Posted Date instead of Date:
-
-column_map = {
-    'Posted Date': 'date', # Changed from 'Date'
-    'Payee Name': 'description', # Changed from 'Description'
-    'Amount': 'amount' 
-}
-
-
-Step 4: Run the Application
-
-Run the Flask App:
-
-With your virtual environment still active, run:
-
+```bash
 python app.py
+```
 
-The first time you run this, it will automatically create all the necessary tables in your budget_db database.
+Access the dashboard at `http://127.0.0.1:5000/`.
 
-Access Your Dashboard:
+-----
 
-Open your web browser and go to:
+## 🧠 The "Ecosystem" Logic (Crucial)
 
-http://127.0.0.1:5000
+This app treats your finances as a **Walled Garden**. It distinguishes between "New Wealth" entering the garden, "Lost Wealth" leaving it, and "Moving Money" inside it.
 
-How to Use:
+### Category Types
 
-First, create accounts using the "Add New Account" form.
+1.  **Income:** Money entering from outside (Salary, Dividends, Venmo).
+2.  **Expense:** Money leaving forever (Groceries, Gas, Bills).
+3.  **Transfer:** Money moving between accounts (Checking ↔ Savings) or to/from tracked assets (Fidelity). **Transfers are generally excluded from "Spending" charts to preserve accuracy.**
 
-Second, select an account, choose a CSV file, and click "Upload" to ingest your transaction data. The dashboard charts will update automatically.
+### The "Credit Card Payment" Rule
+
+The app has a hard-coded logic to **ignore** transactions named exactly `Transfer Credit Card Payment` in almost all charts.
+
+  * **Reason:** You "spent" the money when you bought the item (e.g., $50 Gas). If we counted the $50 CC bill payment as *another* expense, your dashboard would show $100 outflow. Ignoring the payment fixes this "Double Grossing" error.
+
+-----
+
+## 📊 Dashboard Charts Explained
+
+### 1\. Total Net Cash Flow (Sustainability)
+
+**"Did my total available cash grow or shrink this month?"**
+
+  * **Green Bar (Inflow):** Sum of all positive transactions (Income + Transfers In).
+      * *Includes:* Salary, plus money pulled from Fidelity/Investment accounts.
+  * **Red Bar (Outflow):** Sum of all negative transactions (Expenses + Transfers Out).
+      * *Includes:* Living costs, plus money sent to external accounts (e.g., Money Market).
+  * **Blue Line:** The net result. If flat ($0), you are liquid.
+  * *Note:* Internal transfers (Checking ↔ Savings) cancel out here, resulting in a neutral net change.
+
+### 2\. Monthly Net Savings (Growth)
+
+**"Did I add to my savings pile or dip into it?"**
+
+  * **Scope:** Looks **ONLY** at accounts marked as `Savings`.
+  * **Green Bar:** Deposits into savings (Transfers from Checking).
+  * **Red Bar:** Withdrawals from savings (Transfers back to Checking).
+  * **Logic:** Direct expenses paid from Savings (like a car note) are **IGNORED**. This chart strictly measures your *intent to save*, not your bill payments.
+
+### 3\. Core Operating Performance
+
+**"Does my regular job cover my regular life?"**
+
+  * **Core Income:** Strictly Type='Income' (Salary, Rental). **Excludes** transfers from investments.
+  * **Core Expenses:** Daily living costs. **Excludes** specific large/strategic categories: `Car Payment` and `Insurance`.
+  * **Purpose:** To see if your day-to-day lifestyle is sustainable without relying on investment withdrawals or one-time large bills.
+
+### 4\. Income vs. Expenses (Liquidity View)
+
+**"Was I able to fund my lifestyle this month?"**
+
+  * **Income (Green):** Salary + **Transfers from Fidelity/Investments**.
+      * *Why?* If you sell stock to pay for a car, that cash acts like income for that month. This chart treats it as "Realized Liquidity."
+  * **Expense (Red):** Total spending on goods/services.
+
+-----
+
+## 📝 Categorization Guide (Examples)
+
+To make the charts work correctly, use these categorization strategies:
+
+| Scenario | Transaction | Category Type | Category Name (Example) | Result on Dashboard |
+| :--- | :--- | :--- | :--- | :--- |
+| **Salary** | +$4,000 | **Income** | `Paycheck` | Increases Income & Net Worth. |
+| **Paying CC Bill** | -$1,000 | **Transfer** | `Transfer Credit Card Payment` | **IGNORED** (Prevents double counting). |
+| **Saving Money** | -$500 (Chk) | **Transfer** | `Transfer to Savings` | Neutral on Expense Chart. Green on Savings Trend. |
+| **Using Savings** | +$500 (Chk) | **Transfer** | `Transfer from Savings` | Neutral on Expense Chart. Red on Savings Trend. |
+| **Buying Stock** | -$1,000 | **Transfer** | `Transfer Fidelity` | Neutral on Expense Chart (Asset Reallocation). |
+| **Selling Stock** | +$1,000 | **Transfer** | `Transfer Fidelity` | Increases "Income" on Liquidity Chart. |
+| **Car Payoff** | -$13,000 | **Expense** | `Car Payment` | Shows as Expense. Excluded from "Core Operating." |
+
+-----
+
+## 📂 Project Structure
+
+  * **`app.py`**: Main Flask application. Contains `DashboardService` (chart logic) and all database models.
+  * **`templates/`**: HTML files using Tailwind CSS via CDN (or local static files).
+  * **`static/`**:
+      * `js/tailwind.js`: Local Tailwind script.
+      * `css/fontawesome/`: Local FontAwesome icons.
+  * **`requirements.txt`**: Python dependencies.
+
+## ⚡ Troubleshooting
+
+**"My charts show No Data / Jan 2000"**
+
+  * This usually means a date formatting issue. The app expects ISO dates (`YYYY-MM-DD`) for the X-axis. If you customized the Python code, ensure `xaxis_config` uses `type='category'` or `type='date'` consistently with the data provided.
+
+**"I categorized a transaction but the chart didn't update."**
+
+  * Charts are cached or aggregated. Ensure you didn't accidentally mark the transaction as "Deleted".
+  * If using the "Rules" engine, remember to click the **Green Play Button** (Force Apply) in "Manage Rules" to apply a new rule to *old* transactions.
