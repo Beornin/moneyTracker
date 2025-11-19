@@ -4,14 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dates of Interest</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
     <script>
         tailwind.config = { darkMode: 'class' }
     </script>
     
     <!-- NEW: Font Awesome CDN -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" xintegrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-
+<link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome/css/all.min.css') }}">
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
@@ -110,7 +109,10 @@
                                 {{ event.description }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <form action="{{ url_for('delete_event', event_id=event.id) }}" method="POST" onsubmit="return confirm('Delete this event?');">
+                                <!-- 
+                                  FIX: Changed 'event_id' to 'eid' to match the route in app.py
+                                -->
+                                <form action="{{ url_for('delete_event', eid=event.id) }}" method="POST" onsubmit="return confirm('Delete this event?');">
                                     <button type="submit" class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 flex items-center justify-end w-full">
                                         <i class="fa-solid fa-trash-can mr-2"></i>Delete
                                     </button>

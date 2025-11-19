@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Payees</title>
+    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome/css/all.min.css') }}">
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+    <style>
+        /* Flash message styles consistent with other pages */
+        .flash { padding: 1rem; margin-bottom: 1rem; border-radius: 0.375rem; }
+        .flash.success { background-color: #d1fae5; color: #065f46; }
+        .flash.danger { background-color: #fee2e2; color: #991b1b; }
+        .dark .flash.success { background-color: #064e3b; color: #d1fae5; }
+        .dark .flash.danger { background-color: #7f1d1d; color: #fee2e2; }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 font-sans leading-normal tracking-normal min-h-screen transition-colors duration-200 text-gray-900 dark:text-white">
+
+    <div class="container mx-auto max-w-7xl p-6">
+        
+        <div class="flex justify-between items-center mb-6 border-b dark:border-gray-700 pb-4">
+            <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white">
+                <i class="fa-solid fa-users mr-3 text-gray-700 dark:text-gray-300"></i><span class="align-middle">Manage Payees</span>
+            </h1>
+            <a href="{{ url_for('index') }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150 font-medium text-sm">
+                <i class="fa-solid fa-arrow-left mr-2"></i>Back to Dashboard
+            </a>
+        </div>
+
+        <p class="text-lg text-gray-700 dark:text-gray-300 mb-6">
+            View all unique payees imported from your statements. Manually link payees to rules or rename them to fix typos.
+        </p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="mb-6">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }} flex items-center">
+                            <i class="fa-solid {% if category == 'success' %}fa-check-circle{% else %}fa-exclamation-triangle{% endif %} mr-3 w-5 h-5"></i>
+                            <span>{{ message | safe }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 border border-gray-200 dark:border-gray-700">
+            <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-4">
+                <i class="fa-solid fa-user-plus mr-2 text-green-600 dark:text-green-400"></i>Add Manual Payee
+            </h2>
+            <form action="{{ url_for('add_payee') }}" method="POST" class="flex flex-col md:flex-row gap-4 items-end">
+                <div class="flex-grow w-full">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Payee Name</label>
+                    <input type="text" name="new_payee_name" placeholder="e.g. Cash Expense" required 
+                           class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg shadow-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                </div>
+                <div class="w-full md:w-auto">
+                    <button type="submit" class="w-full px-4 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition duration-150 shadow-md flex items-center justify-center">
+                        <i class="fa-solid fa-plus mr-2"></i> Add
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="mb-6">
+            <form action="{{ url_for('manage_payees') }}" method="GET" class="flex gap-2">
+                <div class="relative flex-grow">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i class="fa-solid fa-search text-gray-400"></i>
+                    </div>
+                    <input type="text" name="search" value="{{ search_query }}" placeholder="Search payees or rules..." 
+                           class="block w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-lg leading-5 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out">
+                    
+                    {% if search_query %}
+                        <a href="{{ url_for('manage_payees') }}" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Clear Search">
+                            <i class="fa-solid fa-times-circle"></i>
+                        </a>
+                    {% endif %}
+                </div>
+                
+                <button type="submit" class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-sm transition duration-150 flex items-center">
+                    Search
+                </button>
+            </form>
+        </div>
+
+            <div class="overflow-x-auto">
+                
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead class="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/3">Payee Name (from statement)</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/3">Linked Rule</th>
+                            <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/3">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800">
+                        {% for payee, rule_name, category_name in payees_data %}
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="flex items-center">
+                                    <span class="text-sm font-medium text-gray-900 dark:text-white">{{ payee.name }}</span>
+                                    <span class="ml-3 px-2 py-0.5 text-xs rounded-full border
+                                        {% if not payee.rule_id %} bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-800
+                                        {% else %} bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800 {% endif %}">
+                                        {{ category_name or 'Uncategorized' }}
+                                    </span>
+                                </div>
+                            </td>
+
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <select onchange="linkPayee(this, '{{ payee.id }}')" 
+                                        class="w-full max-w-xs px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="None">-- Unlinked --</option>
+                                    {% for rule in rules %}
+                                        <option value="{{ rule.id }}" {{ 'selected' if rule.id == payee.rule_id }}>
+                                            {{ rule.display_name }} (Matches: {{ rule.fragment }})
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div class="flex justify-end items-center space-x-3">
+                                    <button onclick="openRenameModal('{{ payee.id }}', '{{ payee.name }}')" 
+                                            class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300" title="Rename">
+                                        <i class="fa-solid fa-pen-to-square fa-lg"></i>
+                                    </button>
+                                    
+                                    <form action="{{ url_for('delete_payee', payee_id=payee.id) }}" method="POST" onsubmit="return confirm('Delete payee? This is only allowed if no transactions exist for this payee.')" class="inline">
+                                        <button type="submit" class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300" title="Delete">
+                                            <i class="fa-solid fa-trash-can fa-lg"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="renameModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm hidden items-center justify-center z-50 transition-opacity">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-2xl w-full max-w-md border border-gray-200 dark:border-gray-700 transform scale-100 transition-transform">
+            <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white flex items-center">
+                <i class="fa-solid fa-pen-to-square mr-2 text-indigo-500"></i>Rename Payee
+            </h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                This will rename the payee for all associated transactions.
+            </p>
+            <form action="{{ url_for('rename_payee') }}" method="POST">
+                <input type="hidden" name="payee_id" id="modal_payee_id">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">New Name</label>
+                    <input type="text" name="payee_name" id="modal_payee_name" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500" required>
+                </div>
+                <div class="flex justify-end gap-3">
+                    <button type="button" onclick="document.getElementById('renameModal').classList.add('hidden')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition shadow-md">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function openRenameModal(id, name) {
+            document.getElementById('modal_payee_id').value = id;
+            document.getElementById('modal_payee_name').value = name;
+            const modal = document.getElementById('renameModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        async function linkPayee(select, payeeId) {
+            const ruleId = select.value;
+            const originalText = select.options[select.selectedIndex].text;
+            select.disabled = true;
+            select.classList.add('opacity-50', 'cursor-not-allowed');
+            
+            try {
+                const formData = new FormData();
+                formData.append('payee_id', payeeId);
+                formData.append('rule_id', ruleId);
+                
+                const res = await fetch("{{ url_for('link_payee') }}", { method:'POST', body:formData });
+                const result = await res.json();
+
+                if(result.success) {
+                    // Reload to update the category badges
+                    window.location.reload();
+                } else {
+                    alert('Error linking payee: ' + (result.message || 'Unknown error'));
+                }
+            } catch(e) { 
+                console.error(e);
+                alert('Network error occurred while linking payee.'); 
+            } finally {
+                select.disabled = false;
+                select.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+    </script>
+</body>
+</html>

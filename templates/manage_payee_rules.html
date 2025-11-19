@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Payee Rules</title>
+    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    
+    <!-- FIX: Corrected 'xintegrity' to 'integrity' -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome/css/all.min.css') }}">
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+    <style>
+        .flash { padding: 1rem; margin-bottom: 1rem; border-radius: 0.375rem; }
+        .flash.success { background-color: #d1fae5; color: #065f46; }
+        .flash.danger { background-color: #fee2e2; color: #991b1b; }
+        .flash.info { background-color: #dbeafe; color: #1e40af; }
+        .dark .flash.success { background-color: #064e3b; color: #d1fae5; }
+        .dark .flash.danger { background-color: #7f1d1d; color: #fee2e2; }
+        .dark .flash.info { background-color: #1e3a8a; color: #dbeafe; }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 font-sans leading-normal tracking-normal min-h-screen transition-colors duration-200">
+
+    <div class="container mx-auto max-w-7xl p-6">
+        
+        <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-6 border-b dark:border-gray-700 pb-2">
+            <i class="fa-solid fa-ruler-combined mr-3 text-gray-700 dark:text-gray-300"></i><span class="align-middle">Manage Payee Rules</span>
+        </h1>
+
+        <div class="flex justify-start mb-6">
+            <a href="{{ url_for('index') }}" class="flex items-center text-sm font-medium px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
+                <i class="fa-solid fa-arrow-left mr-2"></i>
+                Back to Dashboard
+            </a>
+            <form action="{{ url_for('run_all_rules_force') }}" method="POST" onsubmit="return confirm('🚨 WARNING: This will re-apply ALL rules to ALL payees, potentially overwriting existing categories and manual links. Proceed with caution?')">
+                <button type="submit" class="px-4 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition shadow-md flex items-center">
+                    <i class="fa-solid fa-bolt mr-2"></i>RUN ALL RULES (Force Overwrite)
+                </button>
+            </form>
+        </div>
+        
+        
+        <div id="flash-container">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="space-y-2 mb-6">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }} flex items-center">
+                            <i class="fa-solid {% if category == 'success' %}fa-check-circle{% elif category == 'danger' %}fa-exclamation-triangle{% else %}fa-info-circle{% endif %} mr-3 w-5 h-5"></i>
+                            <span>{{ message|safe }}</span>
+                        </div>
+                    {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+        </div>
+
+        <!-- Add New Rule Form -->
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 border border-gray-200 dark:border-gray-700">
+            <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-4">
+                <i class="fa-solid fa-plus-circle mr-2 text-indigo-600 dark:text-indigo-400"></i>Add New Rule
+            </h2>
+            <form action="{{ url_for('manage_rules') }}" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end" autocomplete="off">
+                
+                <div class="md:col-span-1">
+                    <label for="fragment" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Match Fragment (ALL CAPS)</label>
+                    <input type="text" name="fragment" id="fragment" required 
+                           placeholder="e.g., PUBLIX"
+                           class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 font-mono">
+                </div>
+
+                <div class="md:col-span-1">
+                    <label for="display_name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Payee Label (for graphs)</label>
+                    <input type="text" name="display_name" id="display_name" required 
+                           placeholder="e.g., Publix"
+                           class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                </div>
+
+                <div class="md:col-span-1">
+                    <label for="category_id_new" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Category</label>
+                    <select name="category_id" id="category_id_new" required
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                        <option value="">-- Select Category --</option>
+                        {% for group_name, categories in grouped_categories.items() %}
+                            <optgroup label="{{ group_name }}" class="dark:bg-gray-800">
+                                {% for cat in categories %}
+                                    <option value="{{ cat.id }}">
+                                        {{ cat.name }}
+                                    </option>
+                                {% endfor %}
+                            </optgroup>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="md:col-span-1">
+                    <button type="submit" class="w-full h-10 inline-flex items-center justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        <i class="fa-solid fa-plus mr-2"></i>Create Rule
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Existing Rules List -->
+        <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+            <i class="fa-solid fa-list-check mr-2"></i>Existing Rules ({{ rules|length }})
+        </h2>
+
+        <div class="mb-6">
+            <form action="{{ url_for('manage_rules') }}" method="GET" class="flex gap-2">
+                <div class="relative flex-grow">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i class="fa-solid fa-search text-gray-400"></i>
+                    </div>
+                    <input type="text" name="search" value="{{ search_query or '' }}" placeholder="Search by fragment, label, or category..." 
+                           class="block w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-lg leading-5 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out">
+                    
+                    {% if search_query %}
+                        <a href="{{ url_for('manage_rules') }}" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Clear Search">
+                            <i class="fa-solid fa-times-circle"></i>
+                        </a>
+                    {% endif %}
+                </div>
+                
+                <button type="submit" class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-sm transition duration-150 flex items-center">
+                    Search
+                </button>
+            </form>
+        </div>
+
+        <div class="bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden">
+            <table class="w-full text-left">
+                <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                        <th class="p-4">Match Fragment</th>
+                        <th class="p-4">Display Label</th>
+                        <th class="p-4">Category</th>
+                        <th class="p-4 text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y dark:divide-gray-700">
+                    {% for rule in rules %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <form action="{{ url_for('manage_rules') }}" method="POST">
+                            <input type="hidden" name="rule_id" value="{{ rule.id }}">
+                            <td class="p-2"><input type="text" name="fragment" value="{{ rule.fragment }}" class="w-full p-1 border rounded dark:bg-gray-600"></td>
+                            <td class="p-2"><input type="text" name="display_name" value="{{ rule.display_name }}" class="w-full p-1 border rounded dark:bg-gray-600"></td>
+                            <td class="p-2">
+                                <select name="category_id" class="w-full p-1 border rounded dark:bg-gray-600">
+                                    {% for group, cats in grouped_categories.items() %}
+                                        <optgroup label="{{ group }}">
+                                            {% for c in cats %}
+                                                <option value="{{ c.id }}" {{ 'selected' if c.id == rule.category_id }}>{{ c.name }}</option>
+                                            {% endfor %}
+                                        </optgroup>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td class="p-2 text-center flex justify-center gap-2">
+                                <button type="submit" title="Save" class="text-indigo-600 hover:text-indigo-800"><i class="fa-solid fa-save"></i></button>
+                        </form>
+                        <form action="{{ url_for('apply_rule_force', rule_id=rule.id) }}" method="POST" onsubmit="return confirm('Force apply this rule? This will overwrite existing categories for ALL matches.')">
+                            <button type="submit" title="Force Apply to All Matches" class="text-green-600 hover:text-green-800 dark:text-green-400 ml-2">
+                                <i class="fa-solid fa-play"></i>
+                            </button>
+                        </form>
+                        <form action="{{ url_for('delete_rule', rule_id=rule.id) }}" method="POST" onsubmit="return confirm('Delete rule?')">
+                            <button type="submit" title="Delete" class="text-red-600 hover:text-red-800"><i class="fa-solid fa-trash"></i></button>
+                        </form>
+                            </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script>
+        setTimeout(() => {
+            const flashContainer = document.getElementById('flash-container');
+            if (flashContainer) {
+                flashContainer.style.transition = 'opacity 0.5s ease';
+                flashContainer.style.opacity = '0';
+                setTimeout(() => flashContainer.innerHTML = '', 500);
+            }
+        }, 5000);
+    </script>
+</body>
+</html>
