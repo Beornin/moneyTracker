@@ -4,10 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Budget Dashboard</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>tailwind.config = {darkMode: 'class'}</script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
@@ -16,10 +24,74 @@
         }
     </script>
     <style>
-        .loader {border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite;}
-        @keyframes spin {0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); }}
-        .info-btn { opacity: 0.4; transition: opacity 0.2s; }
-        .info-btn:hover { opacity: 1; }
+        /* Tooltip Styles - FIXED ALIGNMENT */
+        .tooltip-container {
+            position: relative;
+            display: inline-block;
+        }
+        .tooltip-text {
+            visibility: hidden;
+            width: 280px; /* Slightly reduced width for mobile safety */
+            background-color: #374151; /* gray-700 */
+            color: #f3f4f6; /* gray-100 */
+            text-align: left;
+            border-radius: 6px;
+            padding: 12px;
+            position: absolute;
+            z-index: 100; /* Increased Z-index */
+            bottom: 135%; /* Position above icon */
+            
+            /* FIX: Align left edge with icon, don't center */
+            left: -10px; 
+            margin-left: 0;
+            
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 0.85rem;
+            font-weight: normal;
+            line-height: 1.4;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        
+        /* Little triangle arrow at the bottom left */
+        .tooltip-text::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 15px; /* Align arrow with the icon */
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #374151 transparent transparent transparent;
+        }
+        
+        .dark .tooltip-text {
+            background-color: #e5e7eb; /* gray-200 */
+            color: #1f2937; /* gray-800 */
+            border: 1px solid #d1d5db;
+        }
+        .dark .tooltip-text::after {
+            border-color: #e5e7eb transparent transparent transparent;
+        }
+
+        .tooltip-container:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        /* Loader */
+        .loader {
+            border: 4px solid #f3f3f3; 
+            border-top: 4px solid #3b82f6; 
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
@@ -34,7 +106,9 @@
             {% if messages %}
                 <div class="space-y-2 mb-6">
                     {% for category, message in messages %}
-                        <div class="p-3 text-sm rounded-lg flex items-center {{ 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' if category=='success' else 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }}">
+                        <div class="p-3 text-sm rounded-lg flex items-center
+                            {% if category == 'success' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% elif category == 'danger' %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% else %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200{% endif %}">
+                            <i class="fa-solid {% if category == 'success' %}fa-check-circle{% elif category == 'danger' %}fa-exclamation-triangle{% else %}fa-info-circle{% endif %} mr-3 w-5 h-5"></i>
                             <span>{{ message|safe }}</span>
                         </div>
                     {% endfor %}
@@ -49,448 +123,478 @@
                     <svg id="theme-toggle-light-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 100 2h1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
                 </button>
 
-                <a href="{{ url_for('trends') }}" class="px-4 py-2 border border-purple-500 text-purple-700 dark:text-purple-400 font-semibold rounded-md hover:bg-purple-50 dark:hover:bg-purple-900"><i class="fa-solid fa-chart-line mr-2"></i>Trends</a>
-                <a href="{{ url_for('categorize') }}" class="px-4 py-2 border border-yellow-500 text-yellow-700 dark:text-yellow-400 font-semibold rounded-md hover:bg-yellow-50 dark:hover:bg-yellow-900"><i class="fa-solid fa-tags mr-2"></i>Review ({{ summary.uncategorized_count }})</a>
-                <a href="{{ url_for('manage_payees') }}" class="px-4 py-2 border border-emerald-500 text-emerald-700 dark:text-emerald-400 font-semibold rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-900"><i class="fa-solid fa-users mr-2"></i>Payees</a>
-                <a href="{{ url_for('manage_rules') }}" class="px-4 py-2 border border-orange-500 text-orange-700 dark:text-orange-400 font-semibold rounded-md hover:bg-orange-50 dark:hover:bg-orange-900"><i class="fa-solid fa-ruler-combined mr-2"></i>Rules</a>
-                <a href="{{ url_for('manage_categories') }}" class="px-4 py-2 border border-teal-500 text-teal-700 dark:text-teal-400 font-semibold rounded-md hover:bg-teal-50 dark:hover:bg-teal-900"><i class="fa-solid fa-sitemap mr-2"></i>Categories</a>
-                <a href="{{ url_for('edit_transactions', month_offset=month_offset) }}" class="px-4 py-2 border border-indigo-500 text-indigo-700 dark:text-indigo-400 font-semibold rounded-md hover:bg-indigo-50 dark:hover:bg-indigo-900"><i class="fa-solid fa-pen-to-square mr-2"></i>Edit</a>
-                <a href="{{ url_for('events') }}" class="px-4 py-2 text-sm font-medium text-white bg-pink-600 rounded-lg hover:bg-pink-700 shadow-md"><i class="fa-solid fa-calendar mr-2"></i>Events</a>
-                <a href="{{ url_for('edit_accounts') }}" class="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 shadow-md"><i class="fa-solid fa-landmark mr-2"></i>Accounts</a>
+                <a href="{{ url_for('trends') }}" 
+                   class="flex items-center px-4 py-2 border border-purple-500 text-purple-700 dark:text-purple-400 font-semibold rounded-md bg-purple-50 dark:bg-purple-900 hover:bg-purple-100 dark:hover:bg-purple-800 transition duration-150">
+                    <i class="fa-solid fa-chart-line mr-2"></i>Trend Analysis
+                </a>
+                <a href="{{ url_for('categorize') }}" 
+                   class="flex items-center px-4 py-2 border border-yellow-500 text-yellow-700 dark:text-yellow-400 font-semibold rounded-md bg-yellow-50 dark:bg-yellow-900 hover:bg-yellow-100 dark:hover:bg-yellow-800 transition duration-150">
+                    <i class="fa-solid fa-tags mr-2"></i>Review Transactions ({{ summary.uncategorized_count }})
+                </a>
+                <a href="{{ url_for('manage_categories') }}" 
+                   class="flex items-center px-4 py-2 border border-teal-500 text-teal-700 dark:text-teal-400 font-semibold rounded-md bg-teal-50 dark:bg-teal-900 hover:bg-teal-100 dark:hover:bg-teal-800 transition duration-150">
+                    <i class="fa-solid fa-sitemap mr-2"></i>Manage Categories
+                </a>
+                <a href="{{ url_for('edit_transactions', month_offset=month_offset) }}" 
+                   class="flex items-center px-4 py-2 border border-indigo-500 text-indigo-700 dark:text-indigo-400 font-semibold rounded-md bg-indigo-50 dark:bg-indigo-900 hover:bg-indigo-100 dark:hover:bg-indigo-800 transition duration-150">
+                    <i class="fa-solid fa-pen-to-square mr-2"></i>Edit Transactions
+                </a>
+                <a href="{{ url_for('events') }}" class="flex items-center px-4 py-2 text-sm font-medium text-white bg-pink-600 rounded-lg hover:bg-pink-700 transition duration-300 shadow-md">
+                    <i class="fa-solid fa-calendar mr-2"></i>Dates of Interest
+                </a>
+                <a href="{{ url_for('edit_accounts') }}" class="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition duration-300 shadow-md">
+                    <i class="fa-solid fa-landmark mr-2"></i>Edit Accounts
+                </a>
             </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-200 dark:border-blue-900">
-                <h3 class="text-xl font-semibold text-blue-800 dark:text-blue-300 mb-4"><i class="fa-solid fa-upload mr-2"></i>Upload Transactions</h3>
+                <h3 class="text-xl font-semibold text-blue-800 dark:text-blue-300 mb-4">
+                    <i class="fa-solid fa-upload mr-2"></i>Upload Transactions
+                </h3>
                 <form action="{{ url_for('upload_file') }}" method="POST" enctype="multipart/form-data" class="space-y-4" id="upload-form">
-                    <select name="account_id" required class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
-                        <option value="">-- Select Account --</option>
-                        {% for account in accounts %}
-                            <option value="{{ account.id }}">{{ account.name }} ({{ account.account_type.replace('_', ' ').title() }})</option>
-                        {% endfor %}
-                    </select>
-                    <input type="file" name="file" required accept=".csv,.pdf" multiple class="w-full text-sm text-gray-500 dark:text-gray-400">
-                    <button type="submit" id="upload-button" class="w-full py-2 px-4 rounded-md text-white bg-blue-600 hover:bg-blue-700 flex justify-center items-center">
-                        <i class="fa-solid fa-cloud-arrow-up mr-2"></i>Process & Upload
+                    <div>
+                        <label for="account_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Select Account</label>
+                        <select name="account_id" id="account_id" required 
+                                class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                            <option value="">-- Choose Account --</option>
+                            {% for account in accounts %}
+                                <option value="{{ account.id }}">{{ account.name }} ({{ account.account_type.replace('_', ' ').title() }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label for="file" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Transaction File(s) (CSV or PDF)</label>
+                        <input type="file" name="file" id="file" required accept=".csv,.pdf" multiple
+                               class="mt-1 block w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 dark:file:bg-violet-900 file:text-violet-700 dark:file:text-violet-300 hover:file:bg-violet-100 dark:hover:file:bg-violet-800">
+                    </div>
+                    <button type="submit" id="upload-button" class="w-full justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 flex items-center justify-center disabled:opacity-75">
+                        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" id="upload-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <i class="fa-solid fa-cloud-arrow-up mr-2" id="upload-icon"></i>
+                        <span id="upload-text">Process and Upload</span>
                     </button>
                 </form>
             </div>
+
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-green-200 dark:border-green-900">
-                <h3 class="text-xl font-semibold text-green-800 dark:text-green-300 mb-4"><i class="fa-solid fa-plus-circle mr-2"></i>Add Account</h3>
-                <form action="{{ url_for('add_account') }}" method="POST" class="space-y-4">
-                    <input type="text" name="account_name" required placeholder="Name" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
-                    <select name="account_type" required class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
-                        <option value="checking">Checking</option><option value="savings">Savings</option><option value="credit_card">Credit Card</option>
-                    </select>
-                    <button type="submit" class="w-full py-2 px-4 rounded-md text-white bg-green-600 hover:bg-green-700 flex justify-center items-center"><i class="fa-solid fa-circle-plus mr-2"></i>Create</button>
+                <h3 class="text-xl font-semibold text-green-800 dark:text-green-300 mb-4">
+                    <i class="fa-solid fa-plus-circle mr-2"></i>Add New Account
+                </h3>
+                <form action="{{ url_for('add_account') }}" method="POST" class="space-y-4" autocomplete="off">
+                    <div>
+                        <label for="account_name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Account Name</label>
+                        <input type="text" name="account_name" id="account_name" required 
+                               placeholder="e.g., Chase Checking"
+                               class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                    </div>
+                    <div>
+                        <label for="account_type" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Account Type</label>
+                        <select name="account_type" id="account_type" required 
+                                class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                            <option value="checking">Checking</option>
+                            <option value="savings">Savings</option>
+                            <option value="credit_card">Credit Card</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="w-full justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 flex items-center justify-center">
+                        <i class="fa-solid fa-circle-plus mr-2"></i>Create Account
+                    </button>
                 </form>
             </div>
         </div>
 
-        <div class="mb-8 relative">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-emerald-200 dark:border-emerald-900 h-[500px] relative">
-                <button onclick="showInfo('savings')" class="info-btn absolute top-4 right-4 z-10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fa-solid fa-circle-info fa-xl"></i></button>
-                <div id="chart-savings" class="w-full h-full"></div>
+        <div class="mb-8">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 id="monthly-insights-title" class="text-xl font-semibold text-gray-800 dark:text-gray-200">
+                        <i class="fa-solid fa-lightbulb mr-2 text-yellow-500"></i>Key Insights
+                    </h3>
+                    <button id="regenerate-monthly" class="hidden text-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium">
+                        <i class="fa-solid fa-sync-alt mr-1"></i>Regenerate
+                    </button>
+                </div>
+                <div id="monthly-insights-loading" class="flex items-center space-x-3">
+                    <div class="loader"></div>
+                    <p class="text-lg">Analyzing last month's spending...</p>
+                </div>
+                <div id="monthly-insights-content" class="text-gray-700 dark:text-gray-300 min-h-[100px]"></div>
             </div>
         </div>
         
-        <div class="mb-8 relative">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-amber-200 dark:border-amber-900 h-[500px] relative">
-                <button onclick="showInfo('sustainability')" class="info-btn absolute top-4 right-4 z-10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fa-solid fa-circle-info fa-xl"></i></button>
+        <div class="mb-8">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200">
+                        <i class="fa-solid fa-calendar-check mr-2 text-green-500"></i>Key Insights for This Year (YTD)
+                    </h3>
+                    <button id="regenerate-yearly" class="hidden text-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium">
+                        <i class="fa-solid fa-sync-alt mr-1"></i>Regenerate
+                    </button>
+                </div>
+                <div id="yearly-insights-loading" class="flex items-center space-x-3">
+                    <div class="loader"></div>
+                    <p class="text-lg">Analyzing your year-to-date spending...</p>
+                </div>
+                <div id="yearly-insights-content" class="text-gray-700 dark:text-gray-300 min-h-[100px]"></div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-200 dark:border-blue-900 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question:</strong> Am I spending less than I earn?<br><br>
+                        <strong>The Math:</strong><br>
+                        <span class="text-green-400">Income</span> = Salary + Dividends + Transfers from External Banks.<br>
+                        <span class="text-red-400">Expense</span> = Spending - Refunds.<br><br>
+                        <strong>Contra-Expense Applied:</strong> If you spend $100 and get a $20 refund, this chart shows $80 net expense. Refunds do NOT count as Income here, they reduce expense.
+                    </span>
+                </div>
+                <div id="chart-income-expense" class="w-full h-full"></div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question:</strong> How much liquid cash actually moved this month?<br><br>
+                        <strong>The Math:</strong><br>
+                        <span class="text-green-400">Total Inflow</span> = Sum of ALL positive transactions (Income + Refunds + Transfers In).<br>
+                        <span class="text-red-400">Total Outflow</span> = Sum of ALL negative transactions (Expenses + Transfers Out).<br><br>
+                        <strong>Vs. Budget:</strong> Unlike the Income/Expense chart, this INCLUDES debt payments and transfers to show true liquidity movement.
+                    </span>
+                </div>
                 <div id="chart-cash-flow" class="w-full h-full"></div>
             </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-indigo-200 dark:border-indigo-900 h-[500px] relative">
-                <button onclick="showInfo('core')" class="info-btn absolute top-4 right-4 z-10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fa-solid fa-circle-info fa-xl"></i></button>
+            
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question:</strong> Can I control my day-to-day variable spending?<br><br>
+                        <strong>The Math:</strong><br>
+                        This matches the Budget chart but <u>excludes</u> large fixed costs like <strong>Car Payments</strong> and <strong>Insurance</strong>.<br><br>
+                        <strong>Goal:</strong> The yellow line (Surplus) should be positive. If negative, you are overspending on lifestyle (food, shopping, travel).
+                    </span>
+                </div>
                 <div id="chart-core-operating" class="w-full h-full"></div>
             </div>
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-purple-200 dark:border-purple-900 h-[500px] relative">
-                <button onclick="showInfo('groceries')" class="info-btn absolute top-4 right-4 z-10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fa-solid fa-circle-info fa-xl"></i></button>
-                <div id="chart-groceries" class="w-full h-full"></div>
+
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-green-200 dark:border-green-900 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-green-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question:</strong> Is my savings nest egg growing?<br><br>
+                        <strong>The Math:</strong><br>
+                        <span class="text-green-400">Green Bar</span> = Money moving INTO Savings accounts.<br>
+                        <span class="text-red-400">Red Bar</span> = Money moving OUT of Savings accounts.<br><br>
+                        <strong>Note:</strong> This only tracks accounts explicitly marked as 'Savings' type.
+                    </span>
+                </div>
+                <div id="chart-savings" class="w-full h-full"></div>
             </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-200 dark:border-blue-900 h-[600px] relative">
-                <button onclick="showInfo('income_vs_expense')" class="info-btn absolute top-4 right-4 z-10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fa-solid fa-circle-info fa-xl"></i></button>
-                <div id="chart-income-expense" class="w-full h-full"></div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
-                <button onclick="showInfo('yoy')" class="info-btn absolute top-4 right-4 z-10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fa-solid fa-circle-info fa-xl"></i></button>
-                <div id="chart-yoy" class="w-full h-full"></div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[700px] relative">
-                <button onclick="showInfo('category')" class="info-btn absolute top-4 right-4 z-10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fa-solid fa-circle-info fa-xl"></i></button>
+
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-indigo-200 dark:border-indigo-900 h-[700px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-indigo-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question:</strong> Where exactly is my money going?<br><br>
+                        <strong>The Math:</strong><br>
+                        Sum of Net spending per category. <br>
+                        <strong>Contra-Expense Applied:</strong> If you spent $500 on Shopping but returned $500, this chart shows <strong>$0</strong> (Net), not $1000 of activity. If refunds exceed spending, it shows $0.<br><br>
+                        <strong>Excludes:</strong> Credit Card Payments & System Transfers.
+                    </span>
+                </div>
                 <div id="chart-expense-broad" class="w-full h-full"></div>
             </div>
+
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-purple-200 dark:border-purple-900 h-[700px] relative">
-                <button onclick="showInfo('payee')" class="info-btn absolute top-4 right-4 z-10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fa-solid fa-circle-info fa-xl"></i></button>
-                <div id="chart-top-payees" class="w-full h-full"></div>
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-purple-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question:</strong> Who are my biggest vendors?<br><br>
+                        <strong>The Math:</strong><br>
+                        Total spent at specific merchants over the last 18 months.<br><br>
+                        <strong>Grouping:</strong> Uses your Payee Rules (e.g., 'Publix #123' and 'Publix #456' both count as 'Publix').
+                    </span>
+                </div>
+                <div id="chart-top-expenses" class="w-full h-full"></div>
             </div>
         </div>
+        
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
 
-        <div class="mb-8">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 id="monthly-insights-title" class="text-xl font-semibold text-gray-800 dark:text-gray-200"><i class="fa-solid fa-lightbulb mr-2 text-yellow-500"></i>Key Insights</h3>
-                    <button id="regenerate-monthly" class="hidden text-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"><i class="fa-solid fa-sync-alt mr-1"></i>Regenerate</button>
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question:</strong> Is my lifestyle inflation keeping low?<br><br>
+                        <strong>The Math:</strong><br>
+                        Compares cumulative <strong>Net Expenses</strong> for this year (Solid Line) vs Last Year (Dashed Line).<br><br>
+                        <strong>Logic:</strong> If the solid line is below the dashed line, you are spending less than last year.
+                    </span>
                 </div>
-                <div id="monthly-insights-loading" class="flex items-center space-x-3"><div class="loader"></div><p class="text-lg">Analyzing last month's spending...</p></div>
-                <div id="monthly-insights-content" class="text-gray-700 dark:text-gray-300 min-h-[100px]"></div>
+                <div id="chart-yoy-comparison" class="w-full h-full"></div>
             </div>
-        </div>
-        <div class="mb-8">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200"><i class="fa-solid fa-calendar-check mr-2 text-green-500"></i>Key Insights for This Year (YTD)</h3>
-                    <button id="regenerate-yearly" class="hidden text-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"><i class="fa-solid fa-sync-alt mr-1"></i>Regenerate</button>
-                </div>
-                <div id="yearly-insights-loading" class="flex items-center space-x-3"><div class="loader"></div><p class="text-lg">Analyzing your year-to-date spending...</p></div>
-                <div id="yearly-insights-content" class="text-gray-700 dark:text-gray-300 min-h-[100px]"></div>
-            </div>
-        </div>
 
-        <div id="infoModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm hidden items-center justify-center z-50 transition-opacity">
-            <div class="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-2xl w-full max-w-2xl border border-gray-200 dark:border-gray-700 transform scale-100 transition-transform">
-                <div class="flex justify-between items-start mb-4">
-                    <h3 id="modalTitle" class="text-2xl font-bold text-gray-900 dark:text-white flex items-center">
-                        <i class="fa-solid fa-circle-question mr-2 text-indigo-500"></i> Chart Explained
-                    </h3>
-                    <button onclick="closeInfo()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                        <i class="fa-solid fa-xmark fa-xl"></i>
-                    </button>
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question:</strong> Am I cooking enough vs ordering out?<br><br>
+                        <strong>The Math:</strong><br>
+                        Direct comparison of the 'Groceries' category vs 'Eat Out'.<br><br>
+                        <strong>Insight:</strong> 'Eat Out' is usually 3x more expensive per calorie than 'Groceries'.
+                    </span>
                 </div>
-                <div id="modalBody" class="space-y-4 text-gray-700 dark:text-gray-300 text-lg leading-relaxed"></div>
-                <div class="mt-8 flex justify-end">
-                    <button onclick="closeInfo()" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-semibold">Got it</button>
-                </div>
+                <div id="chart-groceries" class="w-full h-full"></div>
             </div>
+
         </div>
 
         <script>
             function renderChart(plotData, divId) {
                 if (plotData) {
-                    const data = (typeof plotData === 'string') ? JSON.parse(plotData) : plotData;
-                    const isDark = document.documentElement.classList.contains('dark');
-                    if(data.layout) {
-                        data.layout.paper_bgcolor = isDark ? '#1f2937' : '#ffffff';
-                        data.layout.plot_bgcolor = isDark ? '#1f2937' : '#ffffff';
-                        data.layout.font = { color: isDark ? '#d1d5db' : '#111827' };
+                    try {
+                        const data = (typeof plotData === 'string') ? JSON.parse(plotData) : plotData;
+                        const isDarkMode = document.documentElement.classList.contains('dark');
+                        
+                        if(data.layout) {
+                            data.layout.paper_bgcolor = 'rgba(0,0,0,0)'; 
+                            data.layout.plot_bgcolor = 'rgba(0,0,0,0)';
+                            data.layout.font = { color: isDarkMode ? '#d1d5db' : '#111827' };
+                        }
+
+                        Plotly.react(divId, data.data, data.layout, {responsive: true});
+                    } catch (e) {
+                        console.error('Error parsing or rendering plot for ' + divId + ':', e);
+                        document.getElementById(divId).innerHTML = '<div class="text-center text-red-500">Error rendering chart data.</div>';
                     }
-                    Plotly.react(divId, data.data, data.layout, {responsive: true});
                 } else {
-                    document.getElementById(divId).innerHTML = '<div class="text-center text-gray-500 mt-20">No data available.</div>';
+                    document.getElementById(divId).innerHTML = '<div class="text-center text-gray-500 mt-20">No data available for this date range.</div>';
                 }
             }
             
             function renderAllCharts() {
-                renderChart({{ chart_income_vs_expense|safe if chart_income_vs_expense else 'null' }}, 'chart-income-expense');
-                renderChart({{ chart_expense_broad|safe if chart_expense_broad else 'null' }}, 'chart-expense-broad'); 
-                renderChart({{ chart_top_payees|safe if chart_top_payees else 'null' }}, 'chart-top-payees');
-                renderChart({{ chart_yoy|safe if chart_yoy else 'null' }}, 'chart-yoy');
-                renderChart({{ chart_savings|safe if chart_savings else 'null' }}, 'chart-savings');
-                renderChart({{ chart_cash_flow|safe if chart_cash_flow else 'null' }}, 'chart-cash-flow');
-                renderChart({{ chart_groceries|safe if chart_groceries else 'null' }}, 'chart-groceries');
-                renderChart({{ chart_core_operating|safe if chart_core_operating else 'null' }}, 'chart-core-operating');
+                // Note: We use the new keys from app.py here
+                const plot1 = {{ chart_income_vs_expense|safe if chart_income_vs_expense else 'null' }};
+                const plot2 = {{ chart_savings|safe if chart_savings else 'null' }};
+                const plot3 = {{ chart_cash_flow|safe if chart_cash_flow else 'null' }};
+                const plot4 = {{ chart_core_operating|safe if chart_core_operating else 'null' }};
+                const plot5 = {{ chart_groceries|safe if chart_groceries else 'null' }};
+                const plot6 = {{ chart_expense_broad|safe if chart_expense_broad else 'null' }};
+                const plot7 = {{ chart_top_payees|safe if chart_top_payees else 'null' }};
+                const plot8 = {{ chart_yoy|safe if chart_yoy else 'null' }};
+
+                renderChart(plot1, 'chart-income-expense');
+                renderChart(plot2, 'chart-savings');
+                renderChart(plot3, 'chart-cash-flow');
+                renderChart(plot4, 'chart-core-operating');
+                renderChart(plot5, 'chart-groceries');
+                renderChart(plot6, 'chart-expense-broad');
+                renderChart(plot7, 'chart-top-expenses');
+                renderChart(plot8, 'chart-yoy-comparison');
             }
 
-            const explanations = {
-                'sustainability': {
-                    title: 'Total Net Cash Flow (Sustainability)',
-                    body: `
-                        <div class="space-y-4 text-base">
-                            <p><strong>The Core Question:</strong> "Did the total amount of money in my tracked accounts grow or shrink?"</p>
-                            <div class="bg-gray-100 dark:bg-gray-700 p-4 rounded-lg border-l-4 border-amber-500">
-                                <h4 class="font-bold text-amber-600 dark:text-amber-400 mb-1">The Math</h4>
-                                <p class="font-mono text-sm">Net Change = (Total Inflow) - (Total Outflow)</p>
-                            </div>
-                            <ul class="list-disc list-inside space-y-1">
-                                <li><strong class="text-green-600 dark:text-green-400">Inflow:</strong> Salary + Dividends + <em>Any</em> Transfer Entering Accounts (e.g. $10k from Fidelity).</li>
-                                <li><strong class="text-red-600 dark:text-red-400">Outflow:</strong> Expenses + <em>Any</em> Transfer Leaving Accounts (e.g. $3k to Money Market).</li>
-                            </ul>
-                            <div class="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg text-sm mt-2">
-                                <strong>Example:</strong> You move $13k from Fidelity to Checking to pay off a car.
-                                <br>• Chart sees: +$13k Inflow (Green) and -$13k Expense (Red).
-                                <br>• <strong>Result:</strong> $0 Net Change. The chart correctly shows you remained liquid.
-                                <br><em>*Note: Credit Card Bill Payments are excluded to prevent double-counting.</em>
-                            </div>
-                        </div>`
-                },
-                'savings': {
-                    title: 'Liquid Savings Growth',
-                    body: `
-                        <div class="space-y-4 text-base">
-                            <p><strong>The Core Question:</strong> "Did I put more money into savings than I took out?"</p>
-                            <div class="bg-gray-100 dark:bg-gray-700 p-4 rounded-lg border-l-4 border-emerald-500">
-                                <h4 class="font-bold text-emerald-600 dark:text-emerald-400 mb-1">The Math</h4>
-                                <p class="font-mono text-sm">Net = (Transfers In + Interest) - (Transfers Out)</p>
-                            </div>
-                            <ul class="list-disc list-inside space-y-1">
-                                <li><strong>Scope:</strong> Only looks at accounts marked as "Savings".</li>
-                                <li><strong class="text-green-600 dark:text-green-400">Green Bar:</strong> Deposits (Checking → Savings).</li>
-                                <li><strong class="text-red-600 dark:text-red-400">Red Bar:</strong> Withdrawals (Savings → Checking).</li>
-                            </ul>
-                            <div class="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg text-sm mt-2">
-                                <strong>Logic Rule:</strong> If you pay a bill directly from Savings, it is <strong>IGNORED</strong> here. This chart tracks your <em>intent to save</em> vs. your <em>need to raid reserves</em>. It does not track spending.
-                            </div>
-                        </div>`
-                },
-                'core': {
-                    title: 'Core Operating Performance',
-                    body: `
-                        <div class="space-y-4 text-base">
-                            <p><strong>The Core Question:</strong> "Does my regular job cover my regular life?"</p>
-                            <div class="bg-gray-100 dark:bg-gray-700 p-4 rounded-lg border-l-4 border-indigo-500">
-                                <h4 class="font-bold text-indigo-600 dark:text-indigo-400 mb-1">The Math</h4>
-                                <p class="font-mono text-sm">Surplus = (Strict Income) - (Day-to-Day Expenses)</p>
-                            </div>
-                            <ul class="list-disc list-inside space-y-1">
-                                <li><strong class="text-green-600 dark:text-green-400">Core Income:</strong> Strictly Earned Income (Salary, Rental). <strong>EXCLUDES</strong> Fidelity transfers.</li>
-                                <li><strong class="text-indigo-600 dark:text-indigo-400">Core Expenses:</strong> Daily costs. <strong>EXCLUDES</strong> "Car Payment" and "Insurance".</li>
-                            </ul>
-                            <div class="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg text-sm mt-2">
-                                <strong>Why use this?</strong> If you have a "Strategic" month where you pay off a car ($13k), your other charts will look scary. This chart filters that out to show you that your grocery and utility budget is still healthy.
-                            </div>
-                        </div>`
-                },
-                'income_vs_expense': {
-                    title: 'Income vs. Expenses (Liquidity View)',
-                    body: `
-                        <div class="space-y-4 text-base">
-                            <p><strong>The Core Question:</strong> "Was I able to fund my lifestyle this month?"</p>
-                            <div class="bg-gray-100 dark:bg-gray-700 p-4 rounded-lg border-l-4 border-green-500">
-                                <h4 class="font-bold text-green-600 dark:text-green-400 mb-1">The Math</h4>
-                                <p class="font-mono text-sm">Green Bar = Salary + Fidelity Withdrawals</p>
-                            </div>
-                            <ul class="list-disc list-inside space-y-1">
-                                <li><strong>Income (Green):</strong> Includes Salary AND transfers from Investment accounts. It represents "Total Realized Inflow."</li>
-                                <li><strong>Expense (Red):</strong> Total spending on goods/services.</li>
-                            </ul>
-                            <div class="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg text-sm mt-2">
-                                <strong>Difference from "Core":</strong> This chart includes the $13k you pulled from Fidelity as "Income" because you made it available to spend. It balances the graph so you don't see a massive deficit during strategic moves.
-                            </div>
-                        </div>`
-                },
-                'flow': {
-                    title: 'Directional Cash Flow',
-                    body: `
-                        <div class="space-y-4 text-base">
-                            <p><strong>The Core Question:</strong> "Am I building wealth or consuming it?"</p>
-                            <ul class="list-disc list-inside space-y-2">
-                                <li><strong class="text-green-600 dark:text-green-400">Upstream (Green):</strong> Money moving <strong>Checking → Savings → Fidelity</strong>. This tracks your wealth-building inertia.</li>
-                                <li><strong class="text-red-600 dark:text-red-400">Downstream (Red):</strong> Money moving <strong>Fidelity → Savings → Checking</strong>. This highlights when you are "burning furniture to heat the house."</li>
-                            </ul>
-                            <div class="bg-gray-100 dark:bg-gray-700 p-3 rounded-lg border-l-4 border-purple-500 text-sm">
-                                <strong>Keyword Logic:</strong> This chart reads your Category Names. It looks for keywords like "to savings" vs "from savings". Categories marked "Strategic" (like Car Payoff) are skipped to avoid false alarms.
-                            </div>
-                        </div>`
-                },
-                'groceries': {
-                    title: 'Groceries vs. Dining Out',
-                    body: `
-                        <div class="space-y-4 text-base">
-                            <p><strong>The Core Question:</strong> "How efficiently are we feeding ourselves?"</p>
-                            <p>A direct comparison of the <code>'Groceries'</code> category vs the <code>'Eat Out'</code> category.</p>
-                            <div class="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg text-sm">
-                                <strong>Goal:</strong> Generally, you want the Green bar (Groceries) to be higher than the Orange bar (Dining), as groceries provide more meals per dollar.
-                            </div>
-                        </div>`
-                },
-                'yoy': {
-                    title: 'Year-Over-Year Expenses',
-                    body: `
-                        <div class="space-y-4 text-base">
-                            <p><strong>The Core Question:</strong> "Am I spending more this year than I did last year?"</p>
-                            <p>This is a <strong>Cumulative Line Chart</strong>.</p>
-                            <ul class="list-disc list-inside space-y-1">
-                                <li><strong>Gray Dashed Line:</strong> Last Year's running total.</li>
-                                <li><strong>Blue Line:</strong> This Year's running total.</li>
-                            </ul>
-                            <div class="bg-gray-100 dark:bg-gray-700 p-3 rounded-lg border-l-4 border-blue-500 text-sm">
-                                <strong>Interpretation:</strong> If the Blue Line is consistently above the Gray Line, you have "Lifestyle Creep"—your baseline cost of living has increased.
-                            </div>
-                        </div>`
-                },
-                'payee': {
-                    title: 'Top Payees (12 Mo)',
-                    body: `
-                        <p><strong>The Core Question:</strong> "Who is getting most of my money?"</p>
-                        <p class="mt-2">A simple ranking of the top 20 entities you paid over the last 12 months. This quickly highlights if a specific vendor (like Amazon or Costco) is dominating your budget.</p>`
-                },
-                'category': {
-                    title: 'Expense Breakdown',
-                    body: `
-                        <p><strong>The Core Question:</strong> "What am I buying?"</p>
-                        <p class="mt-2">A stacked bar chart showing exactly which categories consumed your income each month.</p>
-                        <div class="mt-2 text-sm text-gray-500">
-                            Tip: Click on a category name in the legend to hide/show it.
-                        </div>`
-                }
-            };
+            var themeToggleBtn = document.getElementById('theme-toggle');
+            var themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
+            var themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
 
-        function showInfo(key) {
-            const data = explanations[key];
-            if(data) {
-                document.getElementById('modalTitle').innerHTML = `<i class="fa-solid fa-circle-question mr-2 text-indigo-500"></i> ${data.title}`;
-                document.getElementById('modalBody').innerHTML = data.body;
-                const modal = document.getElementById('infoModal');
-                modal.classList.remove('hidden');
-                modal.classList.add('flex');
-            }
-        }
-
-        function closeInfo() {
-            const modal = document.getElementById('infoModal');
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-        }
-
-        var themeToggleBtn = document.getElementById('theme-toggle');
-        var themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
-        var themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
-
-        if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            themeToggleLightIcon.classList.remove('hidden');
-        } else {
-            themeToggleDarkIcon.classList.remove('hidden');
-        }
-
-        themeToggleBtn.addEventListener('click', function() {
-            themeToggleDarkIcon.classList.toggle('hidden');
-            themeToggleLightIcon.classList.toggle('hidden');
-            if (localStorage.getItem('theme')) {
-                if (localStorage.getItem('theme') === 'light') {
-                    document.documentElement.classList.add('dark');
-                    localStorage.setItem('theme', 'dark');
-                } else {
-                    document.documentElement.classList.remove('dark');
-                    localStorage.setItem('theme', 'light');
-                }
+            if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                themeToggleLightIcon.classList.remove('hidden');
             } else {
-                if (document.documentElement.classList.contains('dark')) {
-                    document.documentElement.classList.remove('dark');
-                    localStorage.setItem('theme', 'light');
-                } else {
-                    document.documentElement.classList.add('dark');
-                    localStorage.setItem('theme', 'dark');
-                }
+                themeToggleDarkIcon.classList.remove('hidden');
             }
+
+            themeToggleBtn.addEventListener('click', function() {
+                themeToggleDarkIcon.classList.toggle('hidden');
+                themeToggleLightIcon.classList.toggle('hidden');
+
+                if (localStorage.getItem('theme')) {
+                    if (localStorage.getItem('theme') === 'light') {
+                        document.documentElement.classList.add('dark');
+                        localStorage.setItem('theme', 'dark');
+                    } else {
+                        document.documentElement.classList.remove('dark');
+                        localStorage.setItem('theme', 'light');
+                    }
+                } else {
+                    if (document.documentElement.classList.contains('dark')) {
+                        document.documentElement.classList.remove('dark');
+                        localStorage.setItem('theme', 'light');
+                    } else {
+                        document.documentElement.classList.add('dark');
+                        localStorage.setItem('theme', 'dark');
+                    }
+                }
+                renderAllCharts();
+            });
+            
             renderAllCharts();
-        });
+            window.addEventListener('resize', renderAllCharts);
 
-        renderAllCharts();
-        window.addEventListener('resize', renderAllCharts);
-
-        document.addEventListener('DOMContentLoaded', function() {
-            const uploadForm = document.getElementById('upload-form');
-            if (uploadForm) {
-                uploadForm.addEventListener('submit', function() {
-                    document.getElementById('upload-spinner').classList.remove('hidden');
-                    document.getElementById('upload-icon').classList.add('hidden');
-                    document.getElementById('upload-text').textContent = 'Processing...';
-                });
-            }
-            generateMonthlyInsights(false);
-            generateYearlyInsights(false);
-            document.getElementById('regenerate-monthly').addEventListener('click', () => generateMonthlyInsights(true));
-            document.getElementById('regenerate-yearly').addEventListener('click', () => generateYearlyInsights(true));
-        });
-
-        function formatInsightText(text) {
-            let processedText = text.replace(/\\(\$)/g, '$1').replace(/\$?\$-?\$?(-?[\d,.]+)\$?/g, '$$$1').replace(/\n(?!(\* |\[))/g, ' ');
-            let html = processedText.replace(/^\* (.*?)(\n|$)/gm, '<li class="mb-1">$1</li>').replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900 dark:text-white">$1</strong>');
-            return `<ul class="list-disc list-inside space-y-2">${html.replace(/<li>\s*<\/li>/g, '')}</ul>`;
-        }
-
-        async function generateMonthlyInsights(force = false) {
-            const cacheKey = 'monthlyInsightsCache';
-            const container = document.getElementById('monthly-insights-content');
-            const loading = document.getElementById('monthly-insights-loading');
-            const button = document.getElementById('regenerate-monthly');
-            const titleEl = document.getElementById('monthly-insights-title');
-            const twentyFourHours = 24 * 60 * 60 * 1000;
-
-            if (force) {
-                container.innerHTML = '';
-                loading.classList.remove('hidden');
-                button.classList.add('hidden');
-            } else {
-                try {
-                    const cached = localStorage.getItem(cacheKey);
-                    if (cached) {
-                        const data = JSON.parse(cached);
-                        if ((new Date().getTime() - data.timestamp) <= twentyFourHours) {
-                            container.innerHTML = formatInsightText(data.text);
-                            titleEl.innerHTML = `<i class="fa-solid fa-lightbulb mr-2 text-yellow-500"></i>Key Insights for ${data.month_name}`;
-                            loading.classList.add('hidden');
-                            button.classList.remove('hidden');
-                            return; 
-                        }
-                    }
-                } catch (e) { localStorage.removeItem(cacheKey); }
-            }
-            loading.classList.remove('hidden');
-            try {
-                const dataResponse = await fetch("{{ url_for('api_insight_data') }}");
-                const data = await dataResponse.json();
-                if (data.error) throw new Error(data.error);
-                const userQuery = `Analyze last month (${data.last_month_name}) vs prior month: Last Net: $${data.last_month_net}, Prior Net: $${data.prior_month_net}. Last Spend: ${JSON.stringify(data.last_month_spending)}. Prior Spend: ${JSON.stringify(data.prior_month_spending)}. Give 3-5 bullet points on trends.`;
-                const apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={{ gemini_api_key }}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ contents: [{ parts: [{ text: userQuery }] }] }) });
-                const result = await apiResponse.json();
-                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (text) {
-                    localStorage.setItem(cacheKey, JSON.stringify({ timestamp: new Date().getTime(), text: text, month_name: data.last_month_name }));
-                    container.innerHTML = formatInsightText(text);
-                    titleEl.innerHTML = `<i class="fa-solid fa-lightbulb mr-2 text-yellow-500"></i>Key Insights for ${data.last_month_name}`;
+            // --- AI Insights Generators ---
+            document.addEventListener('DOMContentLoaded', function() {
+                // File Upload Spinner
+                const uploadForm = document.getElementById('upload-form');
+                if (uploadForm) {
+                    uploadForm.addEventListener('submit', function() {
+                        const fileInput = document.getElementById('file');
+                        if (fileInput.files.length === 0) return;
+                        document.getElementById('upload-button').disabled = true;
+                        document.getElementById('upload-spinner').classList.remove('hidden');
+                        document.getElementById('upload-icon').classList.add('hidden');
+                        document.getElementById('upload-text').textContent = 'Processing...';
+                    });
                 }
-            } catch (e) { container.innerHTML = `<p class="text-red-500">Error: ${e.message}</p>`; }
-            loading.classList.add('hidden'); button.classList.remove('hidden');
-        }
+                
+                generateMonthlyInsights(false);
+                generateYearlyInsights(false);
 
-        async function generateYearlyInsights(force = false) {
-             const cacheKey = 'yearlyInsightsCache';
-            const container = document.getElementById('yearly-insights-content');
-            const loading = document.getElementById('yearly-insights-loading');
-            const button = document.getElementById('regenerate-yearly');
-            const twentyFourHours = 24 * 60 * 60 * 1000;
+                document.getElementById('regenerate-monthly').addEventListener('click', () => generateMonthlyInsights(true));
+                document.getElementById('regenerate-yearly').addEventListener('click', () => generateYearlyInsights(true));
+            });
 
-            if (force) {
-                container.innerHTML = '';
-                loading.classList.remove('hidden');
-                button.classList.add('hidden');
-            } else {
-                try {
-                    const cached = localStorage.getItem(cacheKey);
-                    if (cached) {
-                        const data = JSON.parse(cached);
-                        if ((new Date().getTime() - data.timestamp) <= twentyFourHours) {
-                            container.innerHTML = formatInsightText(data.text);
-                            loading.classList.add('hidden');
-                            button.classList.remove('hidden');
-                            return;
-                        }
-                    }
-                } catch (e) { localStorage.removeItem(cacheKey); }
+            function formatInsightText(text) {
+                let processedText = text;
+                processedText = processedText.replace(/\\(\$)/g, '$1');
+                processedText = processedText.replace(/\$?\$-?\$?(-?[\d,.]+)\$?/g, '$$$1');
+                processedText = processedText.replace(/\n(?!(\* |\[))/g, ' ');
+                let html = processedText
+                    .replace(/^\* (.*?)(\n|$)/gm, '<li class="mb-1">$1</li>') 
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900 dark:text-white">$1</strong>');
+                html = html.replace(/<li>\s*<\/li>/g, ''); 
+                return `<ul class="list-disc list-inside space-y-2">${html}</ul>`;
             }
-            loading.classList.remove('hidden');
-            try {
-                const dataResponse = await fetch("{{ url_for('api_yearly_insight_data') }}");
-                const data = await dataResponse.json();
-                if (data.error) throw new Error(data.error);
-                const userQuery = `Analyze YTD (${data.current_year}) vs Last YTD (${data.last_year}). Curr Net: $${data.current_ytd_net}, Last Net: $${data.last_ytd_net}. Curr Spend: ${JSON.stringify(data.current_ytd_spending)}. Last Spend: ${JSON.stringify(data.last_ytd_spending)}. Give 3-5 bullet points.`;
-                const apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={{ gemini_api_key }}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ contents: [{ parts: [{ text: userQuery }] }] }) });
-                const result = await apiResponse.json();
-                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (text) {
-                    localStorage.setItem(cacheKey, JSON.stringify({ timestamp: new Date().getTime(), text: text }));
-                    container.innerHTML = formatInsightText(text);
+
+            async function generateMonthlyInsights(force = false) {
+                const cacheKey = 'monthlyInsightsCache';
+                const container = document.getElementById('monthly-insights-content');
+                const loading = document.getElementById('monthly-insights-loading');
+                const button = document.getElementById('regenerate-monthly');
+                const titleEl = document.getElementById('monthly-insights-title');
+                const twentyFourHours = 24 * 60 * 60 * 1000;
+
+                if (force) {
+                    container.innerHTML = '';
+                    loading.classList.remove('hidden');
+                    button.classList.add('hidden');
+                } else {
+                    try {
+                        const cached = localStorage.getItem(cacheKey);
+                        if (cached) {
+                            const data = JSON.parse(cached);
+                            const isExpired = (new Date().getTime() - data.timestamp) > twentyFourHours;
+                            if (!isExpired) {
+                                container.innerHTML = formatInsightText(data.text);
+                                titleEl.innerHTML = `<i class="fa-solid fa-lightbulb mr-2 text-yellow-500"></i>Key Insights for ${data.month_name}`;
+                                loading.classList.add('hidden');
+                                button.classList.remove('hidden');
+                                return; 
+                            }
+                        }
+                    } catch (e) { localStorage.removeItem(cacheKey); }
                 }
-            } catch (e) { container.innerHTML = `<p class="text-red-500">Error: ${e.message}</p>`; }
-            loading.classList.add('hidden'); button.classList.remove('hidden');
-        }
-    </script>
+                
+                loading.classList.remove('hidden');
+
+                try {
+                    const dataResponse = await fetch("{{ url_for('api_insight_data') }}");
+                    if (!dataResponse.ok) throw new Error(`Data API error: ${dataResponse.statusText}`);
+                    const data = await dataResponse.json();
+                    
+                    const systemPrompt = "You are a friendly and encouraging financial assistant. Analyze the user's spending data and provide 3-5 concise bullet points of key insights. Focus on significant percentage changes in major categories, the top 1-2 spending categories, and the net savings. Use markdown for bullet points.";
+                    
+                    const userQuery = `
+                    Here is my financial summary for last month (${data.last_month_name}) vs. the prior month:
+                    - Last Month's Net Savings: $${data.last_month_net}
+                    - Prior Month's Net Savings: $${data.prior_month_net}
+                    - Last Month's Spending by Category: ${JSON.stringify(data.last_month_spending, null, 2)}
+                    - Prior Month's Spending by Category: ${JSON.stringify(data.prior_month_spending, null, 2)}
+                    Please generate the key insights.
+                    `;
+
+                    const apiKey = "{{ gemini_api_key }}"; 
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`; 
+                    const payload = { contents: [{ parts: [{ text: userQuery }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
+
+                    const apiResponse = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    const result = await apiResponse.json();
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                    if (text) {
+                        const cacheData = { timestamp: new Date().getTime(), text: text, month_name: data.last_month_name };
+                        localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+                        container.innerHTML = formatInsightText(text);
+                        titleEl.innerHTML = `<i class="fa-solid fa-lightbulb mr-2 text-yellow-500"></i>Key Insights for ${data.last_month_name}`;
+                    } else { throw new Error("No text response from Gemini API."); }
+                } catch (error) {
+                    container.innerHTML = `<p class="text-red-500"><i class="fa-solid fa-exclamation-triangle mr-2"></i>Could not load insights: ${error.message}</p>`;
+                } finally { loading.classList.add('hidden'); button.classList.remove('hidden'); }
+            }
+
+            async function generateYearlyInsights(force = false) {
+                const cacheKey = 'yearlyInsightsCache';
+                const container = document.getElementById('yearly-insights-content');
+                const loading = document.getElementById('yearly-insights-loading');
+                const button = document.getElementById('regenerate-yearly');
+                const twentyFourHours = 24 * 60 * 60 * 1000;
+
+                if (force) { container.innerHTML = ''; loading.classList.remove('hidden'); button.classList.add('hidden'); } 
+                else {
+                    try {
+                        const cached = localStorage.getItem(cacheKey);
+                        if (cached) {
+                            const data = JSON.parse(cached);
+                            if ((new Date().getTime() - data.timestamp) <= twentyFourHours) {
+                                container.innerHTML = formatInsightText(data.text);
+                                loading.classList.add('hidden'); button.classList.remove('hidden'); return;
+                            }
+                        }
+                    } catch (e) { localStorage.removeItem(cacheKey); }
+                }
+                
+                loading.classList.remove('hidden');
+
+                try {
+                    const dataResponse = await fetch("{{ url_for('api_yearly_insight_data') }}");
+                    const data = await dataResponse.json();
+                    const systemPrompt = "You are a friendly financial assistant. Analyze the user's YTD spending compared to last year. Provide 3-5 concise bullet points.";
+                    const userQuery = `
+                    Here is my financial summary for this YTD (${data.current_year}) vs. last YTD (${data.last_year}):
+                    - This YTD Net Savings: $${data.current_ytd_net} vs Last YTD: $${data.last_ytd_net}
+                    - This YTD Spending: ${JSON.stringify(data.current_ytd_spending, null, 2)}
+                    - Last YTD Spending: ${JSON.stringify(data.last_ytd_spending, null, 2)}
+                    `;
+
+                    const apiKey = "{{ gemini_api_key }}";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`; 
+                    const payload = { contents: [{ parts: [{ text: userQuery }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
+
+                    const apiResponse = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    const result = await apiResponse.json();
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                    if (text) {
+                        localStorage.setItem(cacheKey, JSON.stringify({ timestamp: new Date().getTime(), text: text }));
+                        container.innerHTML = formatInsightText(text);
+                    }
+                } catch (error) { container.innerHTML = `<p class="text-red-500">Could not load insights.</p>`; } 
+                finally { loading.classList.add('hidden'); button.classList.remove('hidden'); }
+            }
+        </script>
+    </div>
 </body>
 </html>

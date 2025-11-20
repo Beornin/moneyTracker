@@ -1,6 +1,7 @@
 import os
 import calendar
 import re
+import io
 from datetime import datetime, date, timedelta 
 import pdfplumber 
 import pandas as pd
@@ -22,9 +23,13 @@ app.config['SECRET_KEY'] = os.urandom(24)
 db = SQLAlchemy(app)
 
 # --- CONSTANTS ---
-EXCLUDED_CAT = 'Transfer Credit Card Payment'
+EXCLUDED_CAT = 'Ignored Credit Card Payment'
 CHASE_DATE_REGEX = re.compile(r"Opening/Closing Date\s*([\d/]+)\s*-\s*([\d/]+)")
-CHASE_TRANS_REGEX = re.compile(r"(\d{1,2}/\d{1,2})\s+(.+)\s+([\d,.-]+\.\d{2})")
+# Matches a line starting with a date (MM/DD)
+CHASE_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*)")
+# Captures the numeric amount at the END of the line
+# Ignores leading characters like $ or - because we rely on Section Headers for sign
+AMOUNT_REGEX = re.compile(r"([\d,]+\.\d{2})(?=\s*$)")
 
 # --- MODELS ---
 
@@ -46,7 +51,6 @@ class Category(db.Model):
     transactions = db.relationship('Transaction', backref='category', lazy=True)
     payee_rules = db.relationship('PayeeRule', backref='category', lazy=True)
     
-    # Index for faster lookups during import
     __table_args__ = (
         db.Index('idx_category_name', 'name'),
     )
@@ -84,7 +88,6 @@ class Transaction(db.Model):
     
     __table_args__ = (
         db.UniqueConstraint('date', 'original_description', 'amount', 'account_id', name='_unique_tx_uc'),
-        # OPTIMIZATION: Indexes for dashboard filtering
         db.Index('idx_tx_date_deleted', 'date', 'is_deleted'),
         db.Index('idx_tx_category', 'category_id'),
         db.Index('idx_tx_account', 'account_id'),
@@ -105,12 +108,33 @@ def create_tables():
         db.session.add(uncat)
         db.session.commit() 
         initial_cats = [
-            {'name': 'Salary', 'type': 'Income'}, {'name': 'Investment Income', 'type': 'Income'},
-            {'name': 'Groceries', 'type': 'Expense'}, {'name': 'Dining Out', 'type': 'Expense'},
-            {'name': 'Housing', 'type': 'Expense'}, {'name': 'Utilities', 'type': 'Expense'},
-            {'name': 'Transportation', 'type': 'Expense'}, {'name': 'Medical', 'type': 'Expense'},
-            {'name': 'Shopping', 'type': 'Expense'}, {'name': 'Entertainment', 'type': 'Expense'},
-            {'name': 'Credit Card Payment', 'type': 'Transfer'}, {'name': 'Savings Transfer', 'type': 'Transfer'},
+            {'name': 'Salary', 'type': 'Income'}, 
+            {'name': 'Empower IRA', 'type': 'Income'}, 
+            {'name': 'Rental', 'type': 'Income'}, 
+            {'name': 'Venmo', 'type': 'Income'}, 
+            {'name': 'Checks', 'type': 'Income'}, 
+            {'name': 'Investment Income', 'type': 'Income'},
+            {'name': 'Reimbursements', 'type': 'Income'},
+            {'name': 'Other Income', 'type': 'Income'},
+            {'name': 'Housing', 'type': 'Expense'}, 
+            {'name': 'Pets', 'type': 'Expense'}, 
+            {'name': 'Car Payment', 'type': 'Expense'}, 
+            {'name': 'Utilities', 'type': 'Expense'},
+            {'name': 'Groceries', 'type': 'Expense'}, 
+            {'name': 'Transportation', 'type': 'Expense'}, 
+            {'name': 'Insurance', 'type': 'Expense'},
+            {'name': 'Medical', 'type': 'Expense'},
+            {'name': 'Education', 'type': 'Expense'},
+            {'name': 'Eat Out', 'type': 'Expense'},
+            {'name': 'Shopping', 'type': 'Expense'}, 
+            {'name': 'Entertainment', 'type': 'Expense'},
+            {'name': 'Personal Care', 'type': 'Expense'},
+            {'name': 'Travel', 'type': 'Expense'},
+            {'name': 'Household', 'type': 'Expense'},
+            {'name': 'Gifts & Donations', 'type': 'Expense'},
+            {'name': 'Ignored Credit Card Payment', 'type': 'Transfer'}, 
+            {'name': 'Savings Transfer', 'type': 'Transfer'},
+            {'name': 'Investment Transfer', 'type': 'Transfer'},
         ]
         for c in initial_cats: db.session.add(Category(**c))
         db.session.commit()
@@ -151,54 +175,87 @@ def parse_chase_pdf(file_stream):
     transactions = []
     try:
         with pdfplumber.open(file_stream) as pdf:
+            # 1. Get Statement Date (Page 1)
             page1_text = pdf.pages[0].extract_text()
             date_match = CHASE_DATE_REGEX.search(page1_text)
             if not date_match: return None
             end_date = datetime.strptime(date_match.group(2), '%m/%d/%y').date()
             end_year, end_month = end_date.year, end_date.month
-            full_text = "".join([p.extract_text() for p in pdf.pages])
-            matches = CHASE_TRANS_REGEX.findall(full_text)
-            for m in matches:
-                d_str, desc, amt_str = m
-                if "Order Number" in desc: continue
-                t_month = int(d_str.split('/')[0])
-                year = end_year if t_month <= end_month else end_year - 1
-                dt = datetime.strptime(f"{t_month}/{d_str.split('/')[1]}/{year}", '%m/%d/%Y').date()
-                try: transactions.append({'Date': dt, 'Description': desc.strip(), 'Amount': float(amt_str.replace(',',''))})
-                except: continue
+
+            # 2. Extract ALL text to parse headers linearly
+            full_text = ""
+            for p in pdf.pages:
+                txt = p.extract_text()
+                if txt: full_text += txt + "\n"
+            
+            # 3. Iterate Line by Line
+            lines = full_text.split('\n')
+            
+            # Default to Expense (-1) until we see "PAYMENTS"
+            current_multiplier = -1 
+            
+            for line in lines:
+                # --- SECTION DETECTION ---
+                if "PAYMENTS AND OTHER CREDITS" in line.upper():
+                    current_multiplier = 1
+                elif "PURCHASE" in line.upper():
+                    current_multiplier = -1
+                
+                # --- TRANSACTION PARSING ---
+                match = CHASE_LINE_REGEX.search(line)
+                if match:
+                    d_str, remainder = match.groups()
+                    
+                    # Find amount at the end of the line (ignoring signs in text)
+                    amt_match = AMOUNT_REGEX.search(remainder)
+                    if amt_match:
+                        # Raw amount string (e.g. "3,269.49")
+                        amt_str = amt_match.group(1)
+                        # Description is everything before the amount
+                        desc_raw = remainder[:amt_match.start()].strip()
+                        
+                        if "Order Number" in desc_raw: continue
+
+                        try:
+                            # Determine Year (handle year rollover)
+                            t_month = int(d_str.split('/')[0])
+                            year = end_year if t_month <= end_month else end_year - 1
+                            dt = datetime.strptime(f"{t_month}/{d_str.split('/')[1]}/{year}", '%m/%d/%Y').date()
+                            
+                            # Parse Amount (Absolute Value)
+                            val = float(amt_str.replace(',', ''))
+                            
+                            # Apply Sign based on Section
+                            final_amount = val * current_multiplier
+                            
+                            transactions.append({
+                                'Date': dt, 
+                                'Description': desc_raw, 
+                                'Amount': final_amount
+                            })
+                        except Exception:
+                            continue
+
         return transactions
-    except: return None
+    except Exception as e:
+        print(f"PDF Parse Error: {e}")
+        return None
 
 def get_monthly_summary_direct(month_offset):
-    """
-    Standalone function for pages that need summary without loading 24mo history.
-    Used by: edit_transactions
-    """
     today = date.today()
     idx = today.month - 1 + month_offset
     year, month = today.year + (idx // 12), (idx % 12) + 1
     start, end = date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
-    
     current_month_name = start.strftime('%B %Y')
-    
-    # Only date math needed for header context
-    return {
-        'start_date': start, 
-        'end_date': end, 
-        'current_month_name': current_month_name
-    }
+    return {'start_date': start, 'end_date': end, 'current_month_name': current_month_name}
 
-# --- DASHBOARD SERVICE (OPTIMIZED) ---
+# --- DASHBOARD SERVICE ---
 
 class DashboardService:
-    """Generates all charts using efficient in-memory aggregation."""
-    
     def __init__(self):
         self.today = date.today()
-        # Fetch 24 months of data once to support YoY and 12-mo trends
         self.start_date_24mo = date(self.today.year - 2, self.today.month, 1)
         
-        # Eager load relations to prevent N+1 queries
         self.transactions = Transaction.query.options(
             joinedload(Transaction.category),
             joinedload(Transaction.account),
@@ -208,54 +265,37 @@ class DashboardService:
             Transaction.is_deleted == False
         ).all()
 
-        self.events = Event.query.filter(
-            Event.date >= self.start_date_24mo
-        ).all()
-
+        self.events = Event.query.filter(Event.date >= self.start_date_24mo).all()
         self.savings_account_ids = {a.id for a in Account.query.filter_by(account_type='savings').all()}
         
-        # --- GLOBAL STYLES ---
-        self.base_layout = dict(
-            paper_bgcolor='rgba(0,0,0,0)', 
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#71717a'), 
-            autosize=True
-        )
-        
+        self.base_layout = dict(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#71717a'), autosize=True)
         self.margin_std = dict(t=40, b=20, l=50, r=10)
         self.margin_legend = dict(t=40, b=100, l=50, r=10) 
         self.margin_events = dict(t=60, b=20, l=50, r=10)
-        
         self.xaxis_date = dict(rangeslider=dict(visible=True), type='date', tickformat='%b %Y')
         self.xaxis_cat = dict(rangeslider=dict(visible=False), type='category')
 
     def get_summary_for_dashboard(self, month_offset):
-        """
-        OPTIMIZATION: Calculates summary stats from ALREADY FETCHED data in memory.
-        Replaces the need for a separate SQL query on the index page.
-        """
         idx = self.today.month - 1 + month_offset
         year, month = self.today.year + (idx // 12), (idx % 12) + 1
         start = date(year, month, 1)
         end = date(year, month, calendar.monthrange(year, month)[1])
+        
+        # Define current_month_name here for context
+        current_month_name = start.strftime('%B %Y')
 
-        # In-memory filtering (Extremely fast compared to DB roundtrip)
         txs = [t for t in self.transactions if start <= t.date <= end]
         
         inc = sum(t.amount for t in txs if t.category.type == 'Income' and t.category.name != EXCLUDED_CAT)
         exp = abs(sum(t.amount for t in txs if t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT))
         
-        # Savings logic
         s_in = sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount > 0 and (t.category.type in ['Transfer', 'Income']))
         s_out = abs(sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount < 0 and t.category.type == 'Transfer'))
 
-        # Totals still need DB for "All Time" balances, but that's cheap
         net_worth = 0.0
         balances = {}
         for a in Account.query.all():
-            net = db.session.query(func.sum(Transaction.amount)).filter(
-                Transaction.account_id==a.id, Transaction.is_deleted==False
-            ).scalar() or 0
+            net = db.session.query(func.sum(Transaction.amount)).filter(Transaction.account_id==a.id, Transaction.is_deleted==False).scalar() or 0
             bal = float(a.starting_balance) + float(net)
             balances[a.name] = bal
             net_worth += bal
@@ -263,17 +303,22 @@ class DashboardService:
         uncat = Transaction.query.join(Payee).filter(Payee.rule_id == None, Transaction.is_deleted == False).count()
 
         return {
-            'start_date': start, 'end_date': end, 'current_month_name': start.strftime('%B %Y'),
-            'total_income': float(inc), 'total_expense': float(exp), 'net_worth': net_worth,
-            'account_balances': balances, 'uncategorized_count': uncat,
-            'savings_in': float(s_in), 'savings_out': float(s_out)
+            'start_date': start, 
+            'end_date': end, 
+            'current_month_name': current_month_name, 
+            'total_income': float(inc), 
+            'total_expense': float(exp), 
+            'net_worth': net_worth, 
+            'account_balances': balances, 
+            'uncategorized_count': uncat, 
+            'savings_in': float(s_in), 
+            'savings_out': float(s_out)
         }
 
     def _get_event_overlays(self, start, end):
         relevant_events = [e for e in self.events if start <= e.date <= end]
         events_map = {}
         for e in relevant_events:
-            # Map event to the 1st of the month for chart alignment
             key = e.date.replace(day=1).strftime('%Y-%m-%d')
             if key not in events_map: events_map[key] = []
             events_map[key].append(e.description)
@@ -281,68 +326,53 @@ class DashboardService:
         shapes, anns = [], []
         for key, descs in events_map.items():
             label = "📍 " + "<br>📍 ".join(descs)
-            shapes.append({
-                'type': 'line', 'x0': key, 'x1': key, 'y0': 0, 'y1': 1,
-                'xref': 'x', 'yref': 'paper', 'line': {'color': '#9ca3af', 'width': 1.5, 'dash': 'dot'}
-            })
-            anns.append({
-                'x': key, 'y': 1.02, 'xref': 'x', 'yref': 'paper',
-                'text': label, 'showarrow': False, 'xanchor': 'center', 'yanchor': 'bottom',
-                'font': {'size': 10, 'color': '#4b5563'}, 'align': 'center'
-            })
+            shapes.append({'type': 'line', 'x0': key, 'x1': key, 'y0': 0, 'y1': 1, 'xref': 'x', 'yref': 'paper', 'line': {'color': '#9ca3af', 'width': 1.5, 'dash': 'dot'}})
+            anns.append({'x': key, 'y': 1.02, 'xref': 'x', 'yref': 'paper', 'text': label, 'showarrow': False, 'xanchor': 'center', 'yanchor': 'bottom', 'font': {'size': 10, 'color': '#4b5563'}, 'align': 'center'})
         return shapes, anns
 
     def generate_all_charts(self):
-        y_start, m_start = self.today.year, self.today.month - 11
-        while m_start <= 0: m_start += 12; y_start -= 1
-        s12 = date(y_start, m_start, 1)
-        e12 = date(self.today.year, self.today.month, calendar.monthrange(self.today.year, self.today.month)[1])
+        y_start, m_start = self.today.year, self.today.month - 17
+        while m_start <= 0: 
+            m_start += 12
+            y_start -= 1
+            
+        s18 = date(y_start, m_start, 1)
+        e18 = date(self.today.year, self.today.month, calendar.monthrange(self.today.year, self.today.month)[1])
         
-        # Get data for charts from cached transactions
-        txs_12 = [t for t in self.transactions if s12 <= t.date <= e12]
-        shapes, anns = self._get_event_overlays(s12, e12)
+        txs_18 = [t for t in self.transactions if s18 <= t.date <= e18]
+        shapes, anns = self._get_event_overlays(s18, e18)
 
         months = []
-        curr = s12
-        while curr <= e12:
+        curr = s18
+        while curr <= e18:
             months.append(curr)
             if curr.month == 12: curr = date(curr.year + 1, 1, 1)
             else: curr = date(curr.year, curr.month + 1, 1)
         
-        # Use ISO format for Date Axis
         month_strs = [m.strftime('%Y-%m-%d') for m in months]
 
         return {
-            'chart_income_vs_expense': self._chart_income_vs_expense(months, month_strs, txs_12, shapes, anns),
-            'chart_savings': self._chart_savings(months, month_strs, txs_12, shapes, anns),
-            'chart_cash_flow': self._chart_cash_flow(months, month_strs, txs_12, shapes, anns),
-            'chart_core_operating': self._chart_core_operating(months, month_strs, txs_12, shapes, anns),
-            'chart_groceries': self._chart_groceries(months, month_strs, txs_12, shapes, anns),
-            'chart_expense_broad': self._chart_expense_broad(months, month_strs, txs_12, shapes, anns),
-            'chart_top_payees': self._chart_top_payees(txs_12),
-            'chart_yoy': self._chart_yoy(),
-            'chart_flow_health': self._chart_flow_health(months, month_strs, txs_12, shapes, anns)
+            'chart_income_vs_expense': self._chart_income_vs_expense(months, month_strs, txs_18, shapes, anns),
+            'chart_savings': self._chart_savings(months, month_strs, txs_18, shapes, anns),
+            'chart_cash_flow': self._chart_cash_flow(months, month_strs, txs_18, shapes, anns),
+            'chart_core_operating': self._chart_core_operating(months, month_strs, txs_18, shapes, anns),
+            'chart_groceries': self._chart_groceries(months, month_strs, txs_18, shapes, anns),
+            'chart_expense_broad': self._chart_expense_broad(months, month_strs, txs_18, shapes, anns),
+            'chart_top_payees': self._chart_top_payees(txs_18, s18), 
+            'chart_yoy': self._chart_yoy()
         }
-
-    # --- INDIVIDUAL CHART LOGIC ---
 
     def _chart_income_vs_expense(self, months, month_strs, txs, shapes, anns):
         incs, exps = [], []
         for m in months:
             m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month and t.category.name != EXCLUDED_CAT]
-            
-            # Logic: Income + Fidelity Withdrawals
             curr_inc = sum(t.amount for t in m_txs if t.category.type == 'Income')
             curr_inc += sum(t.amount for t in m_txs if t.category.type == 'Transfer' and t.category.name in ['Transfer Fidelity', 'Transfer Money Market', 'Transfer External'] and t.amount > 0)
-            
             incs.append(float(curr_inc))
             exps.append(float(abs(sum(t.amount for t in m_txs if t.category.type == 'Expense'))))
 
-        fig = go.Figure(data=[
-            go.Bar(name='Income', x=month_strs, y=incs, marker_color='#22c55e'),
-            go.Bar(name='Expense', x=month_strs, y=exps, marker_color='#ef4444')
-        ])
-        fig.update_layout(title='Income vs Expenses (12 Mo)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
+        fig = go.Figure(data=[go.Bar(name='Income', x=month_strs, y=incs, marker_color='#22c55e'), go.Bar(name='Expense', x=month_strs, y=exps, marker_color='#ef4444')])
+        fig.update_layout(title='Income vs Expenses (18 Mo)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_savings(self, months, month_strs, txs, shapes, anns):
@@ -355,29 +385,24 @@ class DashboardService:
             net_vals.append(net)
             colors.append('#10b981' if net >= 0 else '#ef4444')
             hover_txt.append(f"Net: ${net:,.2f}<br>In: ${in_val:,.2f}<br>Out: ${out_val:,.2f}")
-
         fig = go.Figure(go.Bar(x=month_strs, y=net_vals, marker_color=colors, text=net_vals, texttemplate='$%{y:,.0f}', textposition='auto', hoverinfo='text', hovertext=hover_txt))
         fig.update_layout(title='Monthly Net Savings (Growth vs. Drawdown)', yaxis=dict(title='Net Change ($)', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=False, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_cash_flow(self, months, month_strs, txs, shapes, anns):
-        net_ops, cum_trend, colors, hover_txt = [], [], [], []
-        run_total = 0.0
+        inc, exp, net = [], [], []
         for m in months:
             m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month and t.category.name != EXCLUDED_CAT]
-            inf = float(sum(t.amount for t in m_txs if t.amount > 0))
-            out = float(abs(sum(t.amount for t in m_txs if t.amount < 0)))
-            net = inf - out
-            run_total += net
-            net_ops.append(net)
-            cum_trend.append(run_total)
-            colors.append('#10b981' if net >= 0 else '#ef4444')
-            hover_txt.append(f"Net: ${net:,.0f}<br>In: ${inf:,.0f}<br>Out: ${out:,.0f}")
-
+            i_val = float(sum(t.amount for t in m_txs if t.amount > 0))
+            e_val = float(abs(sum(t.amount for t in m_txs if t.amount < 0)))
+            inc.append(i_val)
+            exp.append(e_val)
+            net.append(i_val - e_val)
         fig = go.Figure()
-        fig.add_trace(go.Bar(name='Monthly Net', x=month_strs, y=net_ops, marker_color=colors, text=net_ops, texttemplate='$%{y:,.0f}', textposition='auto', opacity=0.6, hoverinfo='text', hovertext=hover_txt))
-        fig.add_trace(go.Scatter(name='Cumulative Cash Trend', x=month_strs, y=cum_trend, mode='lines+markers', line=dict(color='#f59e0b', width=4), marker=dict(size=6)))
-        fig.update_layout(title='Total Cash Flow (Excluding CC Payments)', yaxis=dict(title='Net Change ($)', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=False, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
+        fig.add_trace(go.Bar(name='Total Inflow', x=month_strs, y=inc, marker_color='#10b981'))
+        fig.add_trace(go.Bar(name='Total Outflow', x=month_strs, y=exp, marker_color='#ef4444'))
+        fig.add_trace(go.Scatter(name='Net Flow', x=month_strs, y=net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.update_layout(title='Total Cash Flow (Income, Expenses & Transfers)', yaxis=dict(title='Flow Volume ($)', tickformat="$,.0f"), barmode='group', xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_core_operating(self, months, month_strs, txs, shapes, anns):
@@ -390,17 +415,11 @@ class DashboardService:
             c_inc.append(inc_val)
             c_exp.append(exp_val)
             net.append(inc_val - exp_val)
-
         fig = go.Figure()
         fig.add_trace(go.Bar(name='Core Income', x=month_strs, y=c_inc, marker_color='#10b981'))
         fig.add_trace(go.Bar(name='Core Expenses', x=month_strs, y=c_exp, marker_color='#6366f1'))
         fig.add_trace(go.Scatter(name='Operating Surplus', x=month_strs, y=net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
-        fig.update_layout(
-            title='Core Operating Performance (Excl. Car & Insurance)', barmode='group', 
-            yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date,
-            showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5),
-            margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout
-        )
+        fig.update_layout(title='Core Operating Performance (Excl. Car & Insurance)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_groceries(self, months, month_strs, txs, shapes, anns):
@@ -409,47 +428,55 @@ class DashboardService:
             m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month]
             groc.append(float(abs(sum(t.amount for t in m_txs if t.category.name == 'Groceries'))))
             dine.append(float(abs(sum(t.amount for t in m_txs if t.category.name == 'Eat Out'))))
-        fig = go.Figure([
-            go.Bar(name='Groceries', x=month_strs, y=groc, marker_color='#10b981'),
-            go.Bar(name='Eat Out', x=month_strs, y=dine, marker_color='#f59e0b')
-        ])
-        fig.update_layout(title='Groceries vs. Eating Out (12 Mo)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
+        fig = go.Figure([go.Bar(name='Groceries', x=month_strs, y=groc, marker_color='#10b981'), go.Bar(name='Eat Out', x=month_strs, y=dine, marker_color='#f59e0b')])
+        fig.update_layout(title='Groceries vs. Eating Out (18 Mo)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_expense_broad(self, months, month_strs, txs, shapes, anns):
+        # FIX: Sum REAL values first (pos and neg), THEN handle the result
         cat_data = {}
         all_cats = set()
         for m in months:
             m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month and t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT]
             m_key = m.strftime('%Y-%m-%d')
             if m_key not in cat_data: cat_data[m_key] = {}
+            
+            # Pre-calculate net totals per category for this month
+            temp_cat_totals = {}
             for t in m_txs:
                 c_name = t.category.name
                 all_cats.add(c_name)
-                cat_data[m_key][c_name] = cat_data[m_key].get(c_name, 0) + float(abs(t.amount))
+                # Expenses are usually negative. Refunds are positive.
+                temp_cat_totals[c_name] = temp_cat_totals.get(c_name, 0.0) + float(t.amount)
+            
+            # Now store the display value (Absolute value of the Net).
+            # If Net is Positive (Refund > Spend), we treat as 0 Expense to avoid skewing the bar.
+            for c, val in temp_cat_totals.items():
+                if val < 0:
+                    cat_data[m_key][c] = abs(val)
+                else:
+                    cat_data[m_key][c] = 0.0
 
         fig = go.Figure()
         for cat in sorted(list(all_cats)):
             y_vals = [cat_data.get(m, {}).get(cat, 0) for m in month_strs]
             fig.add_trace(go.Bar(name=cat, x=month_strs, y=y_vals))
 
-        fig.update_layout(title='Expenses by Category (12 Mo)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
+        fig.update_layout(title='Expenses by Category (Net, 18 Mo)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
         return to_json(fig, pretty=True)
 
-    def _chart_top_payees(self, txs):
+    def _chart_top_payees(self, txs, start_date):
         payee_totals = {}
         for t in txs:
-            if t.date >= (self.today - timedelta(days=365)) and t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT:
+            if t.date >= start_date and t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT:
                 name = t.payee.rule.display_name if t.payee.rule else t.payee.name
                 payee_totals[name] = payee_totals.get(name, 0) + float(t.amount)
-        
         sorted_payees = sorted(payee_totals.items(), key=lambda item: item[1])[:20]
-        sorted_payees = sorted_payees[::-1] # Reverse for visual
+        sorted_payees = sorted_payees[::-1] 
         names = [p[0] for p in sorted_payees]
         vals = [abs(p[1]) for p in sorted_payees]
-
         fig = go.Figure(data=[go.Bar(x=vals, y=names, orientation='h', marker_color='#6366f1', text=vals, texttemplate='$%{x:,.0f}')])
-        fig.update_layout(title='Top 20 Payees (Last 12 Mo)', xaxis=dict(title='Total Spent', tickformat="$,.0f"), margin=self.margin_std, **self.base_layout)
+        fig.update_layout(title='Top 20 Payees (Last 18 Mo)', xaxis=dict(title='Total Spent', tickformat="$,.0f"), margin=self.margin_std, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_yoy(self):
@@ -457,39 +484,27 @@ class DashboardService:
         def get_yr_data(yr):
             monthly = [0.0] * 13
             yr_txs = [t for t in self.transactions if t.date.year == yr and t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT]
-            for t in yr_txs: monthly[t.date.month] += float(abs(t.amount))
+            # FIX: Sum raw amounts per month, then take absolute value of the Net result
+            monthly_totals = {}
+            for t in yr_txs:
+                m = t.date.month
+                monthly_totals[m] = monthly_totals.get(m, 0.0) + float(t.amount)
+            
+            for m, val in monthly_totals.items():
+                # If val is negative (net expense), take abs. If positive (net refund), ignore/0.
+                if val < 0:
+                    monthly[m] = abs(val)
+                else:
+                    monthly[m] = 0.0
             return monthly[1:]
 
         curr_data = get_yr_data(curr_yr)
         last_data = get_yr_data(last_yr)
         curr_data = [d if i < self.today.month else None for i, d in enumerate(curr_data)]
-
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=list(calendar.month_name[1:]), y=last_data, mode='lines+markers', name=f'{last_yr}', line=dict(color='gray', dash='dash')))
         fig.add_trace(go.Scatter(x=list(calendar.month_name[1:]), y=curr_data, mode='lines+markers', name=f'{curr_yr}', line=dict(color='#6366f1', width=3)))
-        fig.update_layout(title='YoY Expenses', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_cat, margin=self.margin_std, **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_flow_health(self, months, month_strs, txs, shapes, anns):
-        good_kw = ['checking->savings', 'to savings', 'to fidelity', 'checking->fidelity']
-        bad_kw = ['savings->checking', 'from savings', 'fidelity->savings', 'fidelity->checking', 'from fidelity']
-        strat_kw = ['car payoff', 'strategic', 'large purchase']
-        up, down = [], []
-        for m in months:
-            m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month and t.category.type == 'Transfer' and t.category.name != EXCLUDED_CAT]
-            g, b = 0.0, 0.0
-            for t in m_txs:
-                name = t.category.name.lower()
-                amt = abs(float(t.amount))
-                if any(k in name for k in strat_kw): continue
-                if any(k in name for k in bad_kw): b += amt
-                elif any(k in name for k in good_kw): g += amt
-            up.append(g); down.append(-b)
-
-        fig = go.Figure()
-        fig.add_trace(go.Bar(name='Building Reserves', x=month_strs, y=up, marker_color='#10b981', text=up, texttemplate='$%{y:,.0f}', textposition='auto'))
-        fig.add_trace(go.Bar(name='Tapping Reserves', x=month_strs, y=down, marker_color='#ef4444', text=down, texttemplate='$%{y:,.0f}', textposition='auto'))
-        fig.update_layout(title='Directional Flow (Reserve Building vs. Tapping)', yaxis=dict(title='Flow Volume ($)', tickformat="$,.0f"), barmode='relative', xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
+        fig.update_layout(title='YoY Expenses (Net)', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_cat, margin=self.margin_std, **self.base_layout)
         return to_json(fig, pretty=True)
 
 # --- AI INSIGHTS LOGIC ---
@@ -542,21 +557,11 @@ def index(month_offset):
     try: month_offset = int(month_offset)
     except: return redirect(url_for('index'))
     
-    # OPTIMIZATION: Instantiate Service ONCE
     service = DashboardService()
-    
-    # 1. Get Monthly Summary (Cards) from MEMORY (No SQL)
     summary = service.get_summary_for_dashboard(month_offset)
-    
-    # 2. Get All Charts from MEMORY (No SQL)
     charts = service.generate_all_charts()
     
-    return render_template('index.html', 
-                           month_offset=month_offset, 
-                           summary=summary,
-                           accounts=Account.query.all(), 
-                           gemini_api_key=os.getenv('GEMINI_API_KEY'),
-                           **charts)
+    return render_template('index.html', month_offset=month_offset, summary=summary, accounts=Account.query.all(), gemini_api_key=os.getenv('GEMINI_API_KEY'), **charts)
 
 @app.route('/upload_file', methods=['POST'])
 def upload_file():
@@ -589,7 +594,9 @@ def upload_file():
                     date_val = pd.to_datetime(dvals).date() if isinstance(dvals, str) else dvals
                     desc = str(row.get('Description', '')).strip()
                     amount = float(str(row.get('Amount')).replace('$','').replace(',',''))
-                    if account.account_type == 'credit_card' and amount > 0: amount = -amount
+                    if account.account_type == 'credit_card' and file.filename.lower().endswith('.csv') and amount > 0:
+                        amount = -amount # CSV usually positive for expense
+                    
                     if Transaction.query.filter_by(account_id=account.id, date=date_val, amount=amount, original_description=desc).first():
                         skipped += 1
                         continue
@@ -724,8 +731,8 @@ def run_all_rules_force():
 @app.route('/categorize', methods=['GET','POST'])
 def categorize():
     if request.method == 'POST':
-        t = db.session.get(Transaction, request.form.get('transaction_id'))
-        cat = int(request.form.get('category_id'))
+        transaction_id = request.form.get('transaction_id')
+        category_id_str = request.form.get('category_id')
         frag = request.form.get('rule_fragment', '').strip().upper()
         disp = request.form.get('payee_display_name', '').strip()
         c_filt = request.form.get('current_filter', 'all')
@@ -733,31 +740,39 @@ def categorize():
         c_year = request.form.get('current_year', '')
         c_month = request.form.get('current_month', '')
         
-        if t and frag and disp:
+        if transaction_id and category_id_str and frag and disp:
             try:
-                rule = PayeeRule.query.filter_by(fragment=frag).first()
-                if rule:
-                    rule.display_name, rule.category_id = disp, cat
-                    flash_msg = "Updated rule."
-                else:
-                    rule = PayeeRule(fragment=frag, display_name=disp, category_id=cat)
-                    db.session.add(rule)
-                    flash_msg = "Created rule."
-                db.session.commit()
-                t.payee.rule_id, t.category_id = rule.id, cat
-                db.session.commit()
-                count = run_rule_on_all_payees(rule, overwrite=True)
-                flash(f"{flash_msg} Applied to {count + 1}.", "success")
+                t = db.session.get(Transaction, transaction_id)
+                cat_id = int(category_id_str) 
+                if t:
+                    rule = PayeeRule.query.filter_by(fragment=frag).first()
+                    if rule:
+                        rule.display_name = disp
+                        rule.category_id = cat_id
+                        flash_msg = "Updated rule."
+                    else:
+                        rule = PayeeRule(fragment=frag, display_name=disp, category_id=cat_id)
+                        db.session.add(rule)
+                        flash_msg = "Created rule."
+                    db.session.commit()
+                    t.payee.rule_id = rule.id
+                    t.category_id = cat_id
+                    db.session.commit()
+                    count = run_rule_on_all_payees(rule, overwrite=True)
+                    flash(f"{flash_msg} Applied to {count + 1} transactions.", "success")
+            except ValueError:
+                flash("Invalid Category ID.", "danger")
             except Exception as e:
                 db.session.rollback()
                 flash(f"Error: {e}", "danger")
+        else:
+            flash("Missing required fields.", "danger")
         return redirect(url_for('categorize', filter_type=c_filt, search=c_srch, year=c_year, month=c_month))
 
     filt = request.args.get('filter_type', 'all')
     srch = request.args.get('search', '').strip()
     year = request.args.get('year', '')
     month = request.args.get('month', '')
-    
     q = Transaction.query.join(Payee).filter(Transaction.is_deleted == False)
     if not srch: q = q.filter(Payee.rule_id == None)
     if filt == 'positive': q = q.filter(Transaction.amount > 0)
@@ -765,7 +780,6 @@ def categorize():
     if year and year != 'all': q = q.filter(extract('year', Transaction.date) == int(year))
     if month and month != 'all': q = q.filter(extract('month', Transaction.date) == int(month))
     if srch: q = q.filter(or_(Payee.name.ilike(f"%{srch}%"), Transaction.original_description.ilike(f"%{srch}%")))
-    
     txs = q.order_by(Transaction.date.desc()).limit(500 if (srch or year or month) else 50).all()
     cats = Category.query.order_by(Category.type, Category.name).all()
     grouped = {}
@@ -774,7 +788,6 @@ def categorize():
         grouped[c.type].append(c)
     labels = [r.display_name for r in db.session.query(PayeeRule.display_name).distinct().order_by(PayeeRule.display_name).all()]
     available_years = [int(y[0]) for y in db.session.query(extract('year', Transaction.date)).distinct().order_by(extract('year', Transaction.date).desc()).all()]
-    
     return render_template('categorize.html', transactions=txs, grouped_categories=grouped, filter_type=filt, search_query=srch, selected_year=year, selected_month=month, available_years=available_years, existing_labels=labels)
 
 @app.route('/edit_transactions', defaults={'month_offset': '0'}, methods=['GET','POST'])
@@ -782,19 +795,14 @@ def categorize():
 def edit_transactions(month_offset):
     try: month_offset = int(month_offset)
     except: return redirect(url_for('index'))
-    
-    # Re-use get_monthly_summary_direct since we don't need full cache here
     summary = get_monthly_summary_direct(month_offset)
-    
     srch = request.args.get('search', '').strip()
-    
     if srch:
         current_context = f"Search Results: '{srch}'"
         query = Transaction.query.join(Payee).filter(or_(Payee.name.ilike(f"%{srch}%"), Transaction.original_description.ilike(f"%{srch}%")))
     else:
         current_context = summary['current_month_name']
         query = Transaction.query.join(Payee).filter(Transaction.date >= summary['start_date'], Transaction.date <= summary['end_date'])
-        
     txs = query.order_by(Transaction.date.desc()).all()
     cats = Category.query.order_by(Category.type, Category.name).all()
     grouped = {}
