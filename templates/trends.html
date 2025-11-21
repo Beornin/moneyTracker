@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trend Analysis</title>
-    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     
-   <link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 
     <script>
         tailwind.config = { darkMode: 'class' }
@@ -107,6 +107,10 @@
                     </label>
                     <div class="flex items-center space-x-4">
                         <label class="flex items-center">
+                            <input type="radio" name="time_bucket" value="year" class="text-blue-600 dark:bg-gray-700 dark:border-gray-600">
+                            <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Yearly</span>
+                        </label>
+                        <label class="flex items-center">
                             <input type="radio" name="time_bucket" value="month" checked class="text-blue-600 dark:bg-gray-700 dark:border-gray-600">
                             <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Monthly</span>
                         </label>
@@ -121,9 +125,10 @@
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fa-solid fa-tags w-4 mr-1"></i>Categories
                     </label>
-                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-48 overflow-y-auto category-list space-y-3">
+                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-96 overflow-y-auto category-list space-y-3">
                         {% for group_name, categories in grouped_categories.items() %}
-                            {% if group_name.lower() != 'transfers' %} <div>
+                            {% if group_name.lower() != 'transfers' %}
+                            <div>
                                 <h4 class="font-semibold text-gray-800 dark:text-gray-200 text-sm mb-1">{{ group_name }}</h4>
                                 <div class="space-y-1 pl-2">
                                     {% for cat in categories %}
@@ -141,9 +146,9 @@
 
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        <i class="fa-solid fa-user-tag w-4 mr-1"></i>Payees (Grouped)
+                        <i class="fa-solid fa-user-tag w-4 mr-1"></i>Payees
                     </label>
-                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-48 overflow-y-auto category-list space-y-2">
+                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-64 overflow-y-auto category-list space-y-2">
                         {% if payee_labels %}
                             {% for label in payee_labels %}
                             <label class="flex items-center cursor-pointer">
@@ -156,6 +161,29 @@
                         {% else %}
                             <p class="text-sm text-gray-500 dark:text-gray-400 text-center p-4">
                                 No payees found.
+                            </p>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <i class="fa-solid fa-calendar-check w-4 mr-1"></i>Events (Overlay)
+                    </label>
+                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-48 overflow-y-auto category-list space-y-2">
+                        {% if all_events %}
+                            {% for event in all_events %}
+                            <label class="flex items-center cursor-pointer">
+                                <input type="checkbox" name="event_ids" value="{{ event.id }}" checked class="h-4 w-4 text-pink-600 border-gray-300 dark:border-gray-600 rounded">
+                                <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                                    <span class="font-mono text-xs text-gray-500 dark:text-gray-400 mr-1">{{ event.date.strftime('%Y-%m-%d') }}</span>
+                                    {{ event.description }}
+                                </span>
+                            </label>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-sm text-gray-500 dark:text-gray-400 text-center p-4">
+                                No events found. Add some from the <a href="{{ url_for('events') }}" class="text-pink-500 hover:underline">Dates of Interest</a> page.
                             </p>
                         {% endif %}
                     </div>
@@ -175,7 +203,7 @@
                     <p class="mt-4 text-lg font-medium text-gray-700 dark:text-gray-300">Fetching data...</p>
                 </div>
                 <div id="chart-placeholder" class="h-full w-full flex items-center justify-center text-center">
-                    <p class="text-xl text-gray-500 dark:text-gray-400">Please select your options and click "Generate Chart".</p>
+                    <p class="text-xl text-gray-500 dark:text-gray-400">Select Categories, Payees, or Events to visualize.</p>
                 </div>
             </div>
         </div>
@@ -199,14 +227,13 @@
             endDateInput.value = today.toISOString().split('T')[0];
             startDateInput.value = oneYearAgo.toISOString().split('T')[0];
 
-            // Event listener for the "All Data" button
+            // "All Data" button
             allDatesButton.addEventListener('click', async function() {
                 const originalText = allDatesButton.innerHTML;
                 allDatesButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Fetching...';
                 allDatesButton.disabled = true;
 
                 try {
-                    // Renamed endpoint call to match app.py 'api_date_range'
                     const response = await fetch("{{ url_for('api_date_range') }}");
                     if (!response.ok) throw new Error('Could not fetch date range.');
                     
@@ -231,22 +258,17 @@
             form.addEventListener('submit', async function(e) {
                 e.preventDefault();
                 
-                // 1. Get form data
                 const formData = new FormData(form);
                 const categoryIds = formData.getAll('category_ids');
                 const eventIds = formData.getAll('event_ids');
-                
-                // CHANGE THIS LINE: Get 'payee_names' instead of 'payee_ids'
                 const payeeNames = formData.getAll('payee_names'); 
-                
                 const timeBucket = formData.get('time_bucket');
                 const chartType = formData.get('chart_type'); 
                 const startDate = formData.get('start_date');
                 const endDate = formData.get('end_date');
 
-                // Validation: Update to check payeeNames length
                 if (categoryIds.length === 0 && payeeNames.length === 0) {
-                    alert('Please select at least one category or payee.');
+                    alert('Please select at least one category or payee to graph.');
                     return;
                 }
                 
@@ -255,12 +277,10 @@
                     return;
                 }
 
-                // 2. Show loading spinner
                 chartPlaceholder.classList.add('hidden');
                 loadingSpinner.classList.remove('hidden');
 
                 try {
-                    // 3. Fetch data from the API
                     const response = await fetch("{{ url_for('get_trend_data') }}", {
                         method: 'POST',
                         headers: {
@@ -268,7 +288,7 @@
                         },
                         body: JSON.stringify({
                             category_ids: categoryIds,
-                            payee_names: payeeNames, // PASS NAMES HERE
+                            payee_names: payeeNames, 
                             event_ids: eventIds,
                             start_date: startDate,
                             end_date: endDate,
@@ -283,15 +303,13 @@
 
                     const result = await response.json();
 
-                    // 4. Render the chart
                     if (result.plot_data && result.plot_data.length > 0) {
                         const isDarkMode = document.documentElement.classList.contains('dark');
-                        
                         const barMode = (chartType === 'bar') ? 'stack' : 'relative';
                         
                         const layout = {
                             title: `Spending Trends by ${timeBucket.charAt(0).toUpperCase() + timeBucket.slice(1)}`,
-                            barmode: barMode,
+                            barmode: barMode, 
                             xaxis: { 
                                 title: 'Date', 
                                 tickformat: '%Y-%m-%d',
@@ -299,7 +317,7 @@
                             },
                             yaxis: { 
                                 title: 'Amount ($)',
-                                tickformat: '$,.0f'
+                                tickformat: '$,.0f' 
                             },
                             paper_bgcolor: isDarkMode ? '#1f2937' : '#ffffff', 
                             plot_bgcolor: isDarkMode ? '#1f2937' : '#ffffff',
@@ -329,7 +347,6 @@
                     chartPlaceholder.innerHTML = `<p class="text-xl text-red-500 dark:text-red-400">Error loading chart: ${error.message}</p>`;
                     chartPlaceholder.classList.remove('hidden');
                 } finally {
-                    // 5. Hide loading spinner
                     loadingSpinner.classList.add('hidden');
                 }
             });

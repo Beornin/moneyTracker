@@ -4,13 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Categorize Transactions</title>
-    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
         }
     </script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome/css/all.min.css') }}">
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
@@ -26,116 +28,103 @@
         .dark .flash.danger { background-color: #7f1d1d; color: #fee2e2; }
     </style>
 </head>
-<body class="bg-gray-100 dark:bg-gray-900 font-sans leading-normal tracking-normal min-h-screen transition-colors duration-200 text-gray-900 dark:text-white">
+<body class="bg-gray-100 dark:bg-gray-900 font-sans leading-normal tracking-normal min-h-screen transition-colors duration-200">
 
-    <datalist id="existing_payee_labels">
-        {% for label in existing_labels %}
-            <option value="{{ label }}">
-        {% endfor %}
-    </datalist>
-
-    <div class="container mx-auto max-w-7xl p-6">
+    <div class="container mx-auto max-w-6xl p-6">
         
-        <h1 class="text-3xl font-extrabold mb-6 border-b dark:border-gray-700 pb-2">
+        <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-6 border-b dark:border-gray-700 pb-2">
             <i class="fa-solid fa-tags mr-3 text-gray-700 dark:text-gray-300"></i><span class="align-middle">Review Transactions</span>
         </h1>
 
         <div class="flex justify-between items-center mb-6">
-            <a href="{{ url_for('index', month_offset=0) }}" class="flex items-center text-sm font-medium px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
-                <i class="fa-solid fa-arrow-left mr-2"></i> Back to Dashboard
+            <a href="{{ url_for('index', month_offset=0) }}" class="flex items-center text-sm font-medium px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
+                <i class="fa-solid fa-arrow-left mr-2"></i>
+                Back to Dashboard
             </a>
+            
             <a href="{{ url_for('manage_categories') }}" class="flex items-center text-sm font-medium px-4 py-2 bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-800 transition duration-150">
-                <i class="fa-solid fa-sitemap mr-2"></i> Manage Categories
+                <i class="fa-solid fa-sitemap mr-2"></i>
+                Manage All Categories
             </a>
         </div>
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="flash {{ category }} flex items-center">
-                        <i class="fa-solid {% if category == 'success' %}fa-check-circle{% else %}fa-exclamation-triangle{% endif %} mr-3 w-5 h-5"></i>
-                        <span>{{ message | safe }}</span>
-                    </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-
-        <div class="bg-blue-50 dark:bg-blue-900/30 border-l-4 border-blue-500 p-4 mb-6 rounded-r shadow-sm">
-            <div class="flex">
-                <div class="flex-shrink-0">
-                    <i class="fa-solid fa-circle-info text-blue-600 dark:text-blue-400 fa-lg mt-1"></i>
-                </div>
-                <div class="ml-3">
-                    <p class="text-sm text-blue-800 dark:text-blue-200">
-                        <strong>How Rules Work:</strong> When you save a rule here, the system will automatically search your <u>entire history</u> and update <strong>EVERY</strong> transaction that contains your "Match Text".
-                    </p>
-                    <p class="text-xs text-blue-600 dark:text-blue-300 mt-1 font-medium">
-                        <i class="fa-solid fa-triangle-exclamation mr-1"></i>
-                        BE SPECIFIC: If you use generic text like <strong>"THE"</strong>, it will incorrectly categorize "<strong>The</strong> Home Depot", "<strong>The</strong> Gas Station", and "<strong>The</strong> Movies".
-                    </p>
-                </div>
-            </div>
+        <div id="flash-container">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }} flex items-center">
+                            <i class="fa-solid {% if category == 'success' %}fa-check-circle{% else %}fa-exclamation-triangle{% endif %} mr-3 w-5 h-5"></i>
+                            <span>{{ message | safe }}</span>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
         </div>
 
         <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md mb-6 border border-gray-200 dark:border-gray-700">
-            <form action="{{ url_for('categorize') }}" method="GET" class="flex flex-col lg:flex-row gap-4 items-end">
+            <form method="GET" action="{{ url_for('categorize') }}" class="flex flex-wrap gap-4 items-end">
                 
-                <div class="w-full lg:w-1/6">
-                    <label class="block text-xs font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Type</label>
-                    <select name="filter_type" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm p-2 shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
-                        <option value="all" {% if filter_type == 'all' %}selected{% endif %}>All</option>
-                        <option value="negative" {% if filter_type == 'negative' %}selected{% endif %}>Expenses (-)</option>
-                        <option value="positive" {% if filter_type == 'positive' %}selected{% endif %}>Income (+)</option>
-                    </select>
-                </div>
-
-                <div class="w-full lg:w-1/6">
-                    <label class="block text-xs font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Month</label>
-                    <select name="month" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm p-2 shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
-                        <option value="">Any Month</option>
-                        {% for m in range(1, 13) %}
-                            <option value="{{ m }}" {% if selected_month and selected_month|int == m %}selected{% endif %}>{{ m }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="w-full lg:w-1/6">
-                    <label class="block text-xs font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Year</label>
-                    <select name="year" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm p-2 shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
-                        <option value="">Any Year</option>
-                        {% for y in available_years %}
-                            <option value="{{ y }}" {% if selected_year and selected_year|int == y %}selected{% endif %}>{{ y }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="w-full lg:w-1/3">
-                    <label class="block text-xs font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Search</label>
+                <div class="flex-grow min-w-[200px]">
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Search Payee</label>
                     <div class="relative">
-                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <i class="fa-solid fa-search text-gray-400"></i>
-                        </div>
-                        <input type="text" name="search" value="{{ search_query }}" placeholder="Search Payee..." 
-                               class="w-full pl-10 rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm p-2 shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-2 text-gray-500">
+                            <i class="fa-solid fa-search"></i>
+                        </span>
+                        <input type="text" name="search" value="{{ search_query }}" placeholder="e.g. Amazon"
+                               class="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500">
                     </div>
                 </div>
 
-                <div class="flex gap-2 w-full lg:w-auto">
-                    <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-md shadow transition">
-                        Apply
+                <div class="w-40">
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Type</label>
+                    <select name="filter_type" class="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500">
+                        <option value="all" {% if filter_type == 'all' %}selected{% endif %}>All Transactions</option>
+                        <option value="positive" {% if filter_type == 'positive' %}selected{% endif %}>Income (+)</option>
+                        <option value="negative" {% if filter_type == 'negative' %}selected{% endif %}>Expense (-)</option>
+                    </select>
+                </div>
+
+                <div class="w-32">
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Year</label>
+                    <select name="year" class="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500">
+                        <option value="all">All Years</option>
+                        {% for y in available_years %}
+                            <option value="{{ y }}" {% if selected_year == y|string %}selected{% endif %}>{{ y }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="w-40">
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Month</label>
+                    <select name="month" class="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500">
+                        <option value="all">All Months</option>
+                        {% set months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] %}
+                        {% for i in range(12) %}
+                            <option value="{{ i + 1 }}" {% if selected_month == (i + 1)|string %}selected{% endif %}>
+                                {{ months[i] }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="flex gap-2">
+                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">
+                        Filter
                     </button>
-                    {% if filter_type != 'all' or search_query or selected_year or selected_month %}
-                        <a href="{{ url_for('categorize') }}" class="px-4 py-2 bg-gray-300 hover:bg-gray-400 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-800 dark:text-white text-sm font-bold rounded-md shadow transition">
-                            Clear
-                        </a>
-                    {% endif %}
+                    <a href="{{ url_for('categorize') }}" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-md shadow-sm transition-colors">
+                        Clear
+                    </a>
                 </div>
             </form>
         </div>
-
-        <h2 class="text-2xl font-bold mb-4 flex items-center">
-            <i class="fa-solid fa-list-check mr-2 text-yellow-600 dark:text-yellow-400"></i>
-            <span>Results ({{ transactions|length }})</span>
+        
+        <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-4 flex items-center">
+            {% if search_query %}
+                <span class="text-blue-600 dark:text-blue-400 mr-2">Results for "{{ search_query }}"</span>
+            {% else %}
+                <span class="text-yellow-600 dark:text-yellow-400 mr-2">Uncategorized Transactions</span>
+            {% endif %}
+            <span class="text-lg font-normal text-gray-500 dark:text-gray-400 ml-2">({{ transactions|length }} Found)</span>
         </h2>
         
         {% if transactions %}
@@ -145,65 +134,59 @@
                     {% if tx.amount < 0 %} border-red-500 
                     {% elif tx.amount > 0 %} border-green-500 
                     {% else %} border-gray-400 {% endif %} 
-                    flex flex-col xl:flex-row items-start xl:items-center justify-between gap-6 transition-colors duration-200">
+                    flex flex-col sm:flex-row items-start sm:items-center justify-between transition-colors duration-200">
                     
-                    <div class="flex-grow min-w-0 w-full xl:w-auto">
-                        <div class="flex justify-between xl:block mb-1">
-                            <div class="flex flex-wrap items-center gap-x-3 text-sm text-gray-500 dark:text-gray-400">
-                                <span><i class="fa-regular fa-calendar mr-1"></i>{{ tx.date.strftime('%Y-%m-%d') }}</span>
-                                <span class="hidden xl:inline text-gray-300 dark:text-gray-600">|</span>
-                                <span class="text-indigo-600 dark:text-indigo-400 font-medium">
-                                    <i class="fa-solid fa-landmark mr-1"></i>
-                                    {{ tx.account.name }} 
-                                    <span class="text-gray-500 dark:text-gray-500 font-normal">({{ tx.account.account_type.replace('_', ' ').title() }})</span>
-                                </span>
-                            </div>
-                            <p class="text-xl font-bold xl:hidden {% if tx.amount < 0 %} text-red-600 dark:text-red-400 {% else %} text-green-600 dark:text-green-400 {% endif %}">
-                                ${{ "%.2f" | format(tx.amount | float) }}
-                            </p>
+                    <div class="flex-grow mr-4 mb-4 sm:mb-0 w-full sm:w-auto min-w-0">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-sm font-mono text-gray-500 dark:text-gray-400 flex-shrink-0"><i class="fa-regular fa-calendar mr-1"></i>{{ tx.date.strftime('%Y-%m-%d') }}</span>
+                            <span class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 truncate">{{ tx.account.name }} ({{ tx.account.account_type.replace('_',' ').title() }})</span>
                         </div>
                         
-                        <p class="text-lg font-bold text-gray-800 dark:text-gray-100 truncate" title="{{ tx.payee.name }}">
-                            {{ tx.payee.name }}
-                        </p>
+                        <p class="text-lg font-bold text-gray-800 dark:text-gray-100 truncate pr-2" title="{{ tx.payee.name }}">{{ tx.payee.name }}</p>
                         
-                        <p class="text-2xl font-bold hidden xl:block mt-1 {% if tx.amount < 0 %} text-red-600 dark:text-red-400 {% else %} text-green-600 dark:text-green-400 {% endif %}">
+                        <p class="text-2xl font-extrabold 
+                            {% if tx.amount < 0 %} text-red-600 dark:text-red-400
+                            {% else %} text-green-600 dark:text-green-400 {% endif %}">
                             ${{ "%.2f" | format(tx.amount | float) }}
                         </p>
-                        
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 truncate bg-gray-100 dark:bg-gray-700 p-1.5 rounded">
-                            <span class="font-semibold uppercase text-[10px]">Original:</span> {{ tx.original_description }}
-                        </p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 uppercase tracking-wide truncate" title="{{ tx.original_description }}">ORIGINAL: <span class="italic">{{ tx.original_description }}</span></p>
                     </div>
 
-                    <form action="{{ url_for('categorize') }}" method="POST" class="w-full xl:w-[650px] flex-shrink-0 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-md" autocomplete="off">
+                    <form action="{{ url_for('categorize') }}" method="POST" class="w-full sm:w-[450px] bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md border border-gray-200 dark:border-gray-700 flex-shrink-0" autocomplete="off">
                         <input type="hidden" name="transaction_id" value="{{ tx.id }}">
                         
                         <input type="hidden" name="current_filter" value="{{ filter_type }}">
                         <input type="hidden" name="current_search" value="{{ search_query }}">
                         <input type="hidden" name="current_year" value="{{ selected_year }}">
                         <input type="hidden" name="current_month" value="{{ selected_month }}">
-                        
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+
+                        <div class="grid grid-cols-2 gap-2 mb-2">
                             <div>
-                                <label class="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase mb-0.5">Payee Label</label>
-                                <input type="text" name="payee_display_name" list="existing_payee_labels" value="{{ tx.payee.display_name or tx.payee.name }}" required autocomplete="off"
-                                       class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-sm focus:ring-1 focus:ring-blue-500">
+                                <label class="block text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Payee Label</label>
+                                <input type="text" 
+                                    name="payee_display_name" 
+                                    value="{{ tx.payee.display_name or tx.payee.name }}"
+                                    required 
+                                    list="existing_labels"
+                                    class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
                             </div>
                             <div>
-                                <label class="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase mb-0.5">Match Text</label>
-                                <input type="text" name="rule_fragment" value="{{ tx.payee.name }}" required 
-                                       class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-sm focus:ring-1 focus:ring-blue-500">
+                                <label class="block text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Match Text</label>
+                                <input type="text" 
+                                    name="rule_fragment" 
+                                    value="{{ tx.payee.name }}"
+                                    required 
+                                    class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
                             </div>
                         </div>
 
-                        <div class="flex gap-3">
-                            <select name="category_id" required class="flex-grow px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-sm focus:ring-1 focus:ring-indigo-500">
-                                <option value="">-- Category --</option>
+                        <div class="flex gap-2">
+                            <select name="category_id" required class="flex-grow px-2 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                <option value="">Select Category...</option>
                                 {% for group_name, categories in grouped_categories.items() %}
-                                    <optgroup label="{{ group_name }}">
+                                    <optgroup label="{{ group_name }}" class="text-gray-900 dark:text-gray-300 font-bold bg-gray-100 dark:bg-gray-900">
                                         {% for cat in categories %}
-                                            <option value="{{ cat.id }}" {% if cat.id == tx.category_id %}selected{% endif %}>
+                                            <option value="{{ cat.id }}" class="text-gray-900 dark:text-white bg-white dark:bg-gray-800" {% if cat.id == tx.category_id %}selected{% endif %}>
                                                 {{ cat.name }}
                                             </option>
                                         {% endfor %}
@@ -211,7 +194,7 @@
                                 {% endfor %}
                             </select>
 
-                            <button type="submit" class="flex-shrink-0 px-6 py-2 bg-indigo-600 text-white text-sm font-bold rounded hover:bg-indigo-700 transition shadow-sm">
+                            <button type="submit" name="apply_rule" value="true" class="flex-shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 transition-colors">
                                 <i class="fa-solid fa-check mr-1"></i> Save Rule
                             </button>
                         </div>
@@ -220,20 +203,36 @@
                 </div>
                 {% endfor %}
             </div>
+            
+            <datalist id="existing_labels">
+                {% for label in existing_labels %}
+                    <option value="{{ label }}">
+                {% endfor %}
+            </datalist>
+
         {% else %}
-            <div class="bg-gray-50 dark:bg-gray-800 p-10 rounded-lg shadow-inner text-center border-2 border-dashed border-gray-300 dark:border-gray-700">
-                <i class="fa-solid fa-check-double fa-3x text-gray-300 dark:text-gray-600 mb-4"></i>
-                <p class="text-xl font-semibold text-gray-600 dark:text-gray-300">No transactions found.</p>
-                <p class="text-gray-500 dark:text-gray-400">
-                    {% if filter_type != 'all' or search_query or selected_year or selected_month %}
-                        Try adjusting your filters or search terms.
-                    {% else %}
-                        All imported transactions have been categorized!
-                    {% endif %}
-                </p>
+            <div class="bg-white dark:bg-gray-800 p-12 rounded-lg shadow-lg text-center border border-gray-200 dark:border-gray-700">
+                <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 dark:bg-green-900 mb-4">
+                    <i class="fa-solid fa-check text-green-600 dark:text-green-400 text-2xl"></i>
+                </div>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">All caught up!</h3>
+                <p class="text-gray-500 dark:text-gray-400">No transactions match your current filters.</p>
+                <div class="mt-6">
+                    <a href="{{ url_for('categorize') }}" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">Clear Filters</a>
+                </div>
             </div>
         {% endif %}
 
     </div>
+    <script>
+        setTimeout(() => {
+            const flashContainer = document.getElementById('flash-container');
+            if (flashContainer) {
+                flashContainer.style.transition = 'opacity 0.5s ease';
+                flashContainer.style.opacity = '0';
+                setTimeout(() => flashContainer.innerHTML = '', 500);
+            }
+        }, 5000);
+    </script>
 </body>
 </html>

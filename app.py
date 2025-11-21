@@ -7,7 +7,7 @@ import pdfplumber
 import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, extract, case, or_
+from sqlalchemy import func, extract, case, or_, text
 from sqlalchemy.orm import joinedload
 import plotly.graph_objects as go
 from plotly.io import to_json 
@@ -25,58 +25,53 @@ db = SQLAlchemy(app)
 # --- CONSTANTS ---
 EXCLUDED_CAT = 'Ignored Credit Card Payment'
 CHASE_DATE_REGEX = re.compile(r"Opening/Closing Date\s*([\d/]+)\s*-\s*([\d/]+)")
-# Matches a line starting with a date (MM/DD)
 CHASE_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*)")
-# Captures the numeric amount at the END of the line
-# Ignores leading characters like $ or - because we rely on Section Headers for sign
 AMOUNT_REGEX = re.compile(r"([\d,]+\.\d{2})(?=\s*$)")
+
+# --- MIXINS ---
+
+class TimestampMixin(object):
+    created_at = db.Column(db.DateTime, server_default=func.now(), nullable=False)
+    updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
 # --- MODELS ---
 
-class Account(db.Model):
+class Account(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False)
     account_type = db.Column(db.String(50), nullable=False) 
-    starting_balance = db.Column(db.Numeric(10, 2), default=0.00, nullable=False)
     transactions = db.relationship('Transaction', backref='account', lazy=True, cascade="all, delete-orphan")
-    
-    __table_args__ = (
-        db.UniqueConstraint('name', 'account_type', name='_account_uc'),
-    )
+    __table_args__ = (db.UniqueConstraint('name', 'account_type', name='_account_uc'),)
 
-class Category(db.Model):
+class Category(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False, unique=True)
     type = db.Column(db.String(20), nullable=False)
     transactions = db.relationship('Transaction', backref='category', lazy=True)
     payee_rules = db.relationship('PayeeRule', backref='category', lazy=True)
-    
-    __table_args__ = (
-        db.Index('idx_category_name', 'name'),
-    )
+    __table_args__ = (db.Index('idx_category_name', 'name'),)
 
-class PayeeRule(db.Model):
+class PayeeRule(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
-    fragment = db.Column(db.String(500), nullable=False, unique=True)
+    fragment = db.Column(db.String(500), nullable=False)
     display_name = db.Column(db.String(500), nullable=False)
+    match_type = db.Column(db.String(20), default='any', nullable=False)
     category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=False)
     payees = db.relationship('Payee', backref='rule', lazy=True)
     
     __table_args__ = (
         db.Index('idx_rule_fragment', 'fragment'),
+        db.UniqueConstraint('fragment', 'match_type', name='_rule_frag_type_uc'),
     )
 
-class Payee(db.Model):
+class Payee(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(500), nullable=False, unique=True)
     rule_id = db.Column(db.Integer, db.ForeignKey('payee_rule.id'), nullable=True)
     transactions = db.relationship('Transaction', backref='payee', lazy=True)
-    
-    __table_args__ = (
-        db.Index('idx_payee_name', 'name'),
-    )
+    __table_args__ = (db.Index('idx_payee_name', 'name'),)
 
-class Transaction(db.Model):
+class Transaction(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.Date, nullable=False)
     original_description = db.Column(db.String(500), nullable=True) 
@@ -87,13 +82,12 @@ class Transaction(db.Model):
     is_deleted = db.Column(db.Boolean, default=False, nullable=False)
     
     __table_args__ = (
-        db.UniqueConstraint('date', 'original_description', 'amount', 'account_id', name='_unique_tx_uc'),
         db.Index('idx_tx_date_deleted', 'date', 'is_deleted'),
         db.Index('idx_tx_category', 'category_id'),
         db.Index('idx_tx_account', 'account_id'),
     )
 
-class Event(db.Model):
+class Event(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.Date, nullable=False)
     description = db.Column(db.String(500), nullable=False)
@@ -103,38 +97,22 @@ class Event(db.Model):
 
 def create_tables():
     db.create_all()
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE transaction DROP CONSTRAINT IF EXISTS _unique_tx_uc"))
+            conn.commit()
+    except Exception as e:
+        print(f"Constraint cleanup skipped: {e}")
+
     if Category.query.count() == 0:
         uncat = Category(name='Uncategorized', type='Expense')
         db.session.add(uncat)
         db.session.commit() 
         initial_cats = [
-            {'name': 'Salary', 'type': 'Income'}, 
-            {'name': 'Empower IRA', 'type': 'Income'}, 
-            {'name': 'Rental', 'type': 'Income'}, 
-            {'name': 'Venmo', 'type': 'Income'}, 
-            {'name': 'Checks', 'type': 'Income'}, 
-            {'name': 'Investment Income', 'type': 'Income'},
-            {'name': 'Reimbursements', 'type': 'Income'},
-            {'name': 'Other Income', 'type': 'Income'},
-            {'name': 'Housing', 'type': 'Expense'}, 
-            {'name': 'Pets', 'type': 'Expense'}, 
-            {'name': 'Car Payment', 'type': 'Expense'}, 
-            {'name': 'Utilities', 'type': 'Expense'},
-            {'name': 'Groceries', 'type': 'Expense'}, 
-            {'name': 'Transportation', 'type': 'Expense'}, 
-            {'name': 'Insurance', 'type': 'Expense'},
-            {'name': 'Medical', 'type': 'Expense'},
-            {'name': 'Education', 'type': 'Expense'},
-            {'name': 'Eat Out', 'type': 'Expense'},
-            {'name': 'Shopping', 'type': 'Expense'}, 
-            {'name': 'Entertainment', 'type': 'Expense'},
-            {'name': 'Personal Care', 'type': 'Expense'},
-            {'name': 'Travel', 'type': 'Expense'},
-            {'name': 'Household', 'type': 'Expense'},
-            {'name': 'Gifts & Donations', 'type': 'Expense'},
-            {'name': 'Ignored Credit Card Payment', 'type': 'Transfer'}, 
-            {'name': 'Savings Transfer', 'type': 'Transfer'},
-            {'name': 'Investment Transfer', 'type': 'Transfer'},
+            {'name': 'Salary', 'type': 'Income'}, {'name': 'Empower IRA', 'type': 'Income'}, {'name': 'Rental', 'type': 'Income'}, {'name': 'Venmo', 'type': 'Income'}, {'name': 'Checks', 'type': 'Income'}, {'name': 'Investment Income', 'type': 'Income'}, {'name': 'Reimbursements', 'type': 'Income'}, {'name': 'Other Income', 'type': 'Income'},
+            {'name': 'Housing', 'type': 'Expense'}, {'name': 'Pets', 'type': 'Expense'}, {'name': 'Car Payment', 'type': 'Expense'}, {'name': 'Utilities', 'type': 'Expense'}, {'name': 'Groceries', 'type': 'Expense'}, {'name': 'Transportation', 'type': 'Expense'}, {'name': 'Insurance', 'type': 'Expense'}, {'name': 'Medical', 'type': 'Expense'}, {'name': 'Education', 'type': 'Expense'},
+            {'name': 'Eat Out', 'type': 'Expense'}, {'name': 'Shopping', 'type': 'Expense'}, {'name': 'Entertainment', 'type': 'Expense'}, {'name': 'Personal Care', 'type': 'Expense'}, {'name': 'Travel', 'type': 'Expense'}, {'name': 'Household', 'type': 'Expense'}, {'name': 'Gifts & Donations', 'type': 'Expense'},
+            {'name': 'Ignored Credit Card Payment', 'type': 'Transfer'}, {'name': 'Savings Transfer', 'type': 'Transfer'}, {'name': 'Investment Transfer', 'type': 'Transfer'},
         ]
         for c in initial_cats: db.session.add(Category(**c))
         db.session.commit()
@@ -144,12 +122,20 @@ def create_tables():
 def get_uncategorized_id():
     return Category.query.filter_by(name='Uncategorized').first().id
 
-def apply_rules_to_payee(payee, uncat_id):
-    if payee.rule_id: return payee.rule.category_id
+def apply_rules_to_payee(payee, uncat_id, amount):
+    if payee.rule_id: 
+        rule = payee.rule
+        match = True
+        if rule.match_type == 'positive' and amount <= 0: match = False
+        if rule.match_type == 'negative' and amount >= 0: match = False
+        if match: return rule.category_id
+
     rules = PayeeRule.query.all()
     name_upper = payee.name.upper()
     for r in rules:
-        if r.fragment in name_upper:
+        if r.fragment.upper() in name_upper:
+            if r.match_type == 'negative' and amount > 0: continue
+            if r.match_type == 'positive' and amount < 0: continue
             payee.rule_id = r.id
             db.session.commit()
             return r.category_id
@@ -157,89 +143,59 @@ def apply_rules_to_payee(payee, uncat_id):
 
 def run_rule_on_all_payees(rule, overwrite=False):
     uncat_id = get_uncategorized_id()
-    if overwrite: candidates = Payee.query.all()
-    else: candidates = Payee.query.filter_by(rule_id=None).all()
-    
-    if not candidates: return 0
-    
-    matches = [p.id for p in candidates if rule.fragment in p.name.upper()]
+    matches = Payee.query.filter(Payee.name.ilike(f"%{rule.fragment}%")).all()
     if not matches: return 0
-
-    Payee.query.filter(Payee.id.in_(matches)).update({'rule_id': rule.id}, synchronize_session=False)
-    Transaction.query.filter(Transaction.payee_id.in_(matches)).update({'category_id': rule.category_id}, synchronize_session=False)
-    
+    count = 0
+    for p in matches:
+        if overwrite or not p.rule_id:
+            p.rule_id = rule.id
+        for t in p.transactions:
+            is_match = True
+            if rule.match_type == 'positive' and t.amount <= 0: is_match = False
+            if rule.match_type == 'negative' and t.amount >= 0: is_match = False
+            if is_match:
+                t.category_id = rule.category_id
+                count += 1
     db.session.commit()
-    return len(matches)
+    return count
 
 def parse_chase_pdf(file_stream):
     transactions = []
     try:
         with pdfplumber.open(file_stream) as pdf:
-            # 1. Get Statement Date (Page 1)
             page1_text = pdf.pages[0].extract_text()
             date_match = CHASE_DATE_REGEX.search(page1_text)
             if not date_match: return None
             end_date = datetime.strptime(date_match.group(2), '%m/%d/%y').date()
             end_year, end_month = end_date.year, end_date.month
 
-            # 2. Extract ALL text to parse headers linearly
             full_text = ""
             for p in pdf.pages:
                 txt = p.extract_text()
                 if txt: full_text += txt + "\n"
-            
-            # 3. Iterate Line by Line
             lines = full_text.split('\n')
-            
-            # Default to Expense (-1) until we see "PAYMENTS"
             current_multiplier = -1 
-            
             for line in lines:
-                # --- SECTION DETECTION ---
-                if "PAYMENTS AND OTHER CREDITS" in line.upper():
-                    current_multiplier = 1
-                elif "PURCHASE" in line.upper():
-                    current_multiplier = -1
-                
-                # --- TRANSACTION PARSING ---
+                if "PAYMENTS AND OTHER CREDITS" in line.upper(): current_multiplier = 1
+                elif "PURCHASE" in line.upper(): current_multiplier = -1
                 match = CHASE_LINE_REGEX.search(line)
                 if match:
                     d_str, remainder = match.groups()
-                    
-                    # Find amount at the end of the line (ignoring signs in text)
                     amt_match = AMOUNT_REGEX.search(remainder)
                     if amt_match:
-                        # Raw amount string (e.g. "3,269.49")
                         amt_str = amt_match.group(1)
-                        # Description is everything before the amount
                         desc_raw = remainder[:amt_match.start()].strip()
-                        
                         if "Order Number" in desc_raw: continue
-
                         try:
-                            # Determine Year (handle year rollover)
                             t_month = int(d_str.split('/')[0])
                             year = end_year if t_month <= end_month else end_year - 1
                             dt = datetime.strptime(f"{t_month}/{d_str.split('/')[1]}/{year}", '%m/%d/%Y').date()
-                            
-                            # Parse Amount (Absolute Value)
-                            val = float(amt_str.replace(',', ''))
-                            
-                            # Apply Sign based on Section
+                            val = abs(float(amt_str.replace(',', '')))
                             final_amount = val * current_multiplier
-                            
-                            transactions.append({
-                                'Date': dt, 
-                                'Description': desc_raw, 
-                                'Amount': final_amount
-                            })
-                        except Exception:
-                            continue
-
+                            transactions.append({'Date': dt, 'Description': desc_raw, 'Amount': final_amount})
+                        except Exception: continue
         return transactions
-    except Exception as e:
-        print(f"PDF Parse Error: {e}")
-        return None
+    except Exception as e: print(f"PDF Parse Error: {e}"); return None
 
 def get_monthly_summary_direct(month_offset):
     today = date.today()
@@ -255,7 +211,6 @@ class DashboardService:
     def __init__(self):
         self.today = date.today()
         self.start_date_24mo = date(self.today.year - 2, self.today.month, 1)
-        
         self.transactions = Transaction.query.options(
             joinedload(Transaction.category),
             joinedload(Transaction.account),
@@ -280,40 +235,17 @@ class DashboardService:
         year, month = self.today.year + (idx // 12), (idx % 12) + 1
         start = date(year, month, 1)
         end = date(year, month, calendar.monthrange(year, month)[1])
-        
-        # Define current_month_name here for context
         current_month_name = start.strftime('%B %Y')
-
         txs = [t for t in self.transactions if start <= t.date <= end]
-        
         inc = sum(t.amount for t in txs if t.category.type == 'Income' and t.category.name != EXCLUDED_CAT)
         exp = abs(sum(t.amount for t in txs if t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT))
-        
         s_in = sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount > 0 and (t.category.type in ['Transfer', 'Income']))
         s_out = abs(sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount < 0 and t.category.type == 'Transfer'))
-
         net_worth = 0.0
         balances = {}
-        for a in Account.query.all():
-            net = db.session.query(func.sum(Transaction.amount)).filter(Transaction.account_id==a.id, Transaction.is_deleted==False).scalar() or 0
-            bal = float(a.starting_balance) + float(net)
-            balances[a.name] = bal
-            net_worth += bal
-
         uncat = Transaction.query.join(Payee).filter(Payee.rule_id == None, Transaction.is_deleted == False).count()
-
-        return {
-            'start_date': start, 
-            'end_date': end, 
-            'current_month_name': current_month_name, 
-            'total_income': float(inc), 
-            'total_expense': float(exp), 
-            'net_worth': net_worth, 
-            'account_balances': balances, 
-            'uncategorized_count': uncat, 
-            'savings_in': float(s_in), 
-            'savings_out': float(s_out)
-        }
+        dup_count = 0 
+        return {'start_date': start, 'end_date': end, 'current_month_name': current_month_name, 'total_income': float(inc), 'total_expense': float(exp), 'net_worth': net_worth, 'account_balances': balances, 'uncategorized_count': uncat, 'savings_in': float(s_in), 'savings_out': float(s_out), 'duplicate_count': dup_count}
 
     def _get_event_overlays(self, start, end):
         relevant_events = [e for e in self.events if start <= e.date <= end]
@@ -322,12 +254,8 @@ class DashboardService:
             key = e.date.replace(day=1).strftime('%Y-%m-%d')
             if key not in events_map: events_map[key] = []
             events_map[key].append(e.description)
-
-        shapes, anns = [], []
-        for key, descs in events_map.items():
-            label = "📍 " + "<br>📍 ".join(descs)
-            shapes.append({'type': 'line', 'x0': key, 'x1': key, 'y0': 0, 'y1': 1, 'xref': 'x', 'yref': 'paper', 'line': {'color': '#9ca3af', 'width': 1.5, 'dash': 'dot'}})
-            anns.append({'x': key, 'y': 1.02, 'xref': 'x', 'yref': 'paper', 'text': label, 'showarrow': False, 'xanchor': 'center', 'yanchor': 'bottom', 'font': {'size': 10, 'color': '#4b5563'}, 'align': 'center'})
+        shapes = [{'type': 'line', 'x0': k, 'x1': k, 'y0': 0, 'y1': 1, 'xref': 'x', 'yref': 'paper', 'line': {'color': '#9ca3af', 'width': 1.5, 'dash': 'dot'}} for k in events_map]
+        anns = [{'x': k, 'y': 1.02, 'xref': 'x', 'yref': 'paper', 'text': "📍 " + "<br>📍 ".join(v), 'showarrow': False, 'xanchor': 'center', 'yanchor': 'bottom', 'font': {'size': 10, 'color': '#4b5563'}, 'align': 'center'} for k, v in events_map.items()] 
         return shapes, anns
 
     def generate_all_charts(self):
@@ -335,22 +263,17 @@ class DashboardService:
         while m_start <= 0: 
             m_start += 12
             y_start -= 1
-            
         s18 = date(y_start, m_start, 1)
         e18 = date(self.today.year, self.today.month, calendar.monthrange(self.today.year, self.today.month)[1])
-        
         txs_18 = [t for t in self.transactions if s18 <= t.date <= e18]
         shapes, anns = self._get_event_overlays(s18, e18)
-
         months = []
         curr = s18
         while curr <= e18:
             months.append(curr)
             if curr.month == 12: curr = date(curr.year + 1, 1, 1)
             else: curr = date(curr.year, curr.month + 1, 1)
-        
         month_strs = [m.strftime('%Y-%m-%d') for m in months]
-
         return {
             'chart_income_vs_expense': self._chart_income_vs_expense(months, month_strs, txs_18, shapes, anns),
             'chart_savings': self._chart_savings(months, month_strs, txs_18, shapes, anns),
@@ -358,21 +281,30 @@ class DashboardService:
             'chart_core_operating': self._chart_core_operating(months, month_strs, txs_18, shapes, anns),
             'chart_groceries': self._chart_groceries(months, month_strs, txs_18, shapes, anns),
             'chart_expense_broad': self._chart_expense_broad(months, month_strs, txs_18, shapes, anns),
+            'chart_core_summary': self._chart_core_summary(months, month_strs, txs_18, shapes, anns),
             'chart_top_payees': self._chart_top_payees(txs_18, s18), 
             'chart_yoy': self._chart_yoy()
         }
 
     def _chart_income_vs_expense(self, months, month_strs, txs, shapes, anns):
         incs, exps = [], []
+        cumulative_savings = 0.0 
+        cumulative_data = []
         for m in months:
             m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month and t.category.name != EXCLUDED_CAT]
             curr_inc = sum(t.amount for t in m_txs if t.category.type == 'Income')
-            curr_inc += sum(t.amount for t in m_txs if t.category.type == 'Transfer' and t.category.name in ['Transfer Fidelity', 'Transfer Money Market', 'Transfer External'] and t.amount > 0)
+            curr_exp = sum(t.amount for t in m_txs if t.category.type == 'Expense')
             incs.append(float(curr_inc))
-            exps.append(float(abs(sum(t.amount for t in m_txs if t.category.type == 'Expense'))))
+            exps.append(float(abs(curr_exp)))
+            monthly_net = float(curr_inc) - float(abs(curr_exp))
+            cumulative_savings += monthly_net
+            cumulative_data.append(cumulative_savings)
 
-        fig = go.Figure(data=[go.Bar(name='Income', x=month_strs, y=incs, marker_color='#22c55e'), go.Bar(name='Expense', x=month_strs, y=exps, marker_color='#ef4444')])
-        fig.update_layout(title='Income vs Expenses (18 Mo)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
+        fig = go.Figure()
+        fig.add_trace(go.Bar(name='Income', x=month_strs, y=incs, marker_color='#22c55e'))
+        fig.add_trace(go.Bar(name='Expense', x=month_strs, y=exps, marker_color='#ef4444'))
+        fig.add_trace(go.Scatter(name='Cumulative Savings', x=month_strs, y=cumulative_data, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.update_layout(title='Income vs Expenses (Budget View)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=dict(t=60, b=100, l=50, r=10), **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_savings(self, months, month_strs, txs, shapes, anns):
@@ -391,35 +323,97 @@ class DashboardService:
 
     def _chart_cash_flow(self, months, month_strs, txs, shapes, anns):
         inc, exp, net = [], [], []
+        cumulative_flow = 0.0 
+        cumulative_data = []
+        valid_transfers = ['Investment Transfer', 'Savings Transfer']
         for m in months:
             m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month and t.category.name != EXCLUDED_CAT]
-            i_val = float(sum(t.amount for t in m_txs if t.amount > 0))
-            e_val = float(abs(sum(t.amount for t in m_txs if t.amount < 0)))
-            inc.append(i_val)
-            exp.append(e_val)
-            net.append(i_val - e_val)
+            i_val = sum(t.amount for t in m_txs if (t.category.type == 'Income') or (t.amount > 0 and t.category.name in valid_transfers) or (t.amount > 0 and t.category.type == 'Expense')) 
+            e_val = sum(t.amount for t in m_txs if (t.category.type == 'Expense' and t.amount < 0) or (t.amount < 0 and t.category.name in valid_transfers))
+            i_val = float(i_val)
+            e_val = float(abs(e_val))
+            monthly_net = i_val - e_val
+            cumulative_flow += monthly_net
+            inc.append(i_val); exp.append(e_val); net.append(monthly_net)
+            cumulative_data.append(cumulative_flow)
+
         fig = go.Figure()
         fig.add_trace(go.Bar(name='Total Inflow', x=month_strs, y=inc, marker_color='#10b981'))
         fig.add_trace(go.Bar(name='Total Outflow', x=month_strs, y=exp, marker_color='#ef4444'))
-        fig.add_trace(go.Scatter(name='Net Flow', x=month_strs, y=net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
-        fig.update_layout(title='Total Cash Flow (Income, Expenses & Transfers)', yaxis=dict(title='Flow Volume ($)', tickformat="$,.0f"), barmode='group', xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
+        fig.add_trace(go.Scatter(name='Cumulative Net Flow', x=month_strs, y=cumulative_data, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.update_layout(title='Total Cash Flow (Liquidity View)', yaxis=dict(title='Flow Volume ($)', tickformat="$,.0f"), barmode='group', xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
         return to_json(fig, pretty=True)
-
+    
+    def _chart_core_summary(self, months, month_strs, txs, shapes, anns):
+        # GOAL: Top 20 Payees specifically from the "Core Expenses" bucket
+        # This drills down into the Purple bars of the neighbor chart
+        
+        excl = ['Car Payment', 'VUL', 'AC Payment']
+        payee_map = {}
+        
+        for m in months:
+            # Filter for this month
+            m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month]
+            
+            for t in m_txs:
+                # Logic matches Core Operating Expense definition:
+                # Type is Expense AND Category is NOT in the exclusion list
+                if t.category.type == 'Expense' and t.category.name not in excl:
+                    # Use Rule Display Name if available, else Raw Name
+                    name = t.payee.rule.display_name if t.payee.rule else t.payee.name
+                    
+                    # Sum up (Expenses are negative, we sum them as is)
+                    payee_map[name] = payee_map.get(name, 0.0) + float(t.amount)
+        
+        # Sort by magnitude (biggest spenders)
+        # expenses are negative, so we want the "smallest" numbers (e.g. -5000 < -100)
+        sorted_payees = sorted(payee_map.items(), key=lambda item: item[1])[:20]
+        
+        # Reverse for Plotly Horizontal Bar (Top item at top of chart)
+        sorted_payees = sorted_payees[::-1] 
+        
+        names = [p[0] for p in sorted_payees]
+        # Convert to positive for display
+        vals = [abs(p[1]) for p in sorted_payees] 
+        
+        fig = go.Figure(data=[go.Bar(
+            x=vals, 
+            y=names, 
+            orientation='h', 
+            marker_color='#6366f1', # Matches Core Expense Purple
+            text=vals, 
+            texttemplate='$%{x:,.0f}', 
+            hovertemplate='%{y}<br>$%{x:,.2f}<extra></extra>'
+        )])
+        
+        fig.update_layout(
+            title='Top 20 Core Operating Payees (18 Mo)', 
+            xaxis=dict(title='Total Spent', tickformat="$,.0f"), 
+            margin=self.margin_std, 
+            **self.base_layout
+        )
+        return to_json(fig, pretty=True)
+    
     def _chart_core_operating(self, months, month_strs, txs, shapes, anns):
         c_inc, c_exp, net = [], [], []
-        excl = ['Car Payment', 'Insurance']
+        cumulative_surplus = 0.0
+        cumulative_net = []
+        excl = ['Car Payment', 'VUL', 'AC Payment']
         for m in months:
             m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month]
-            inc_val = float(sum(t.amount for t in m_txs if t.category.type == 'Income'))
+            inc_val = float(sum(t.amount for t in m_txs if t.category.type == 'Income' and t.category.name != 'Empower IRA'))
             exp_val = float(abs(sum(t.amount for t in m_txs if t.category.type == 'Expense' and t.category.name not in excl)))
+            current_surplus = inc_val - exp_val
+            cumulative_surplus += current_surplus 
             c_inc.append(inc_val)
             c_exp.append(exp_val)
-            net.append(inc_val - exp_val)
+            cumulative_net.append(cumulative_surplus) 
+
         fig = go.Figure()
         fig.add_trace(go.Bar(name='Core Income', x=month_strs, y=c_inc, marker_color='#10b981'))
         fig.add_trace(go.Bar(name='Core Expenses', x=month_strs, y=c_exp, marker_color='#6366f1'))
-        fig.add_trace(go.Scatter(name='Operating Surplus', x=month_strs, y=net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
-        fig.update_layout(title='Core Operating Performance (Excl. Car & Insurance)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
+        fig.add_trace(go.Scatter(name='Cumulative Surplus', x=month_strs, y=cumulative_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.update_layout(title='Core Operating Performance (Day-to-Day)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_groceries(self, months, month_strs, txs, shapes, anns):
@@ -433,36 +427,24 @@ class DashboardService:
         return to_json(fig, pretty=True)
 
     def _chart_expense_broad(self, months, month_strs, txs, shapes, anns):
-        # FIX: Sum REAL values first (pos and neg), THEN handle the result
         cat_data = {}
         all_cats = set()
         for m in months:
             m_txs = [t for t in txs if t.date.year == m.year and t.date.month == m.month and t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT]
             m_key = m.strftime('%Y-%m-%d')
             if m_key not in cat_data: cat_data[m_key] = {}
-            
-            # Pre-calculate net totals per category for this month
             temp_cat_totals = {}
             for t in m_txs:
                 c_name = t.category.name
                 all_cats.add(c_name)
-                # Expenses are usually negative. Refunds are positive.
                 temp_cat_totals[c_name] = temp_cat_totals.get(c_name, 0.0) + float(t.amount)
-            
-            # Now store the display value (Absolute value of the Net).
-            # If Net is Positive (Refund > Spend), we treat as 0 Expense to avoid skewing the bar.
             for c, val in temp_cat_totals.items():
-                if val < 0:
-                    cat_data[m_key][c] = abs(val)
-                else:
-                    cat_data[m_key][c] = 0.0
-
+                cat_data[m_key][c] = abs(val) if val < 0 else 0.0
         fig = go.Figure()
-        for cat in sorted(list(all_cats)):
+        for cat in sorted(list(all_cats), reverse=True):
             y_vals = [cat_data.get(m, {}).get(cat, 0) for m in month_strs]
             fig.add_trace(go.Bar(name=cat, x=month_strs, y=y_vals))
-
-        fig.update_layout(title='Expenses by Category (Net, 18 Mo)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
+        fig.update_layout(title='Expenses by Category (Net, 18 Mo)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, legend=dict(traceorder='reversed'), **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_top_payees(self, txs, start_date):
@@ -475,7 +457,7 @@ class DashboardService:
         sorted_payees = sorted_payees[::-1] 
         names = [p[0] for p in sorted_payees]
         vals = [abs(p[1]) for p in sorted_payees]
-        fig = go.Figure(data=[go.Bar(x=vals, y=names, orientation='h', marker_color='#6366f1', text=vals, texttemplate='$%{x:,.0f}')])
+        fig = go.Figure(data=[go.Bar(x=vals, y=names, orientation='h', marker_color='#6366f1', text=vals, texttemplate='$%{x:,.0f}', hovertemplate='%{y}<br>$%{x:,.2f}<extra></extra>')])
         fig.update_layout(title='Top 20 Payees (Last 18 Mo)', xaxis=dict(title='Total Spent', tickformat="$,.0f"), margin=self.margin_std, **self.base_layout)
         return to_json(fig, pretty=True)
 
@@ -484,20 +466,13 @@ class DashboardService:
         def get_yr_data(yr):
             monthly = [0.0] * 13
             yr_txs = [t for t in self.transactions if t.date.year == yr and t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT]
-            # FIX: Sum raw amounts per month, then take absolute value of the Net result
             monthly_totals = {}
             for t in yr_txs:
                 m = t.date.month
                 monthly_totals[m] = monthly_totals.get(m, 0.0) + float(t.amount)
-            
             for m, val in monthly_totals.items():
-                # If val is negative (net expense), take abs. If positive (net refund), ignore/0.
-                if val < 0:
-                    monthly[m] = abs(val)
-                else:
-                    monthly[m] = 0.0
+                monthly[m] = abs(val) if val < 0 else 0.0
             return monthly[1:]
-
         curr_data = get_yr_data(curr_yr)
         last_data = get_yr_data(last_yr)
         curr_data = [d if i < self.today.month else None for i, d in enumerate(curr_data)]
@@ -571,23 +546,28 @@ def upload_file():
     account = db.session.get(Account, account_id)
     if not account: abort(404)
     uncat_id = get_uncategorized_id()
-    added, skipped = 0, 0
+    added, skipped, duplicates = 0, 0, 0
+    
     for file in files:
         try:
             df = pd.DataFrame()
             if file.filename.lower().endswith('.csv'):
                 stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+                # CSV Format: Date, Amount, x, x, Description (Indices 0, 1, 4)
                 df = pd.read_csv(stream)
-                df.rename(columns=lambda x: x.strip(), inplace=True)
-                if 'Post Date' in df.columns: df.rename(columns={'Post Date': 'Date'}, inplace=True)
-                if 'Memo' in df.columns: df.rename(columns={'Memo': 'Description'}, inplace=True)
+                if df.shape[1] >= 5:
+                    df = df.iloc[:, [0, 1, 4]]
+                    df.columns = ['Date', 'Amount', 'Description']
+                else:
+                    flash(f"Skipping {file.filename}: Incorrect columns.", "warning")
+                    continue
             elif file.filename.lower().endswith('.pdf'):
                 data = parse_chase_pdf(file.stream)
                 if data: df = pd.DataFrame(data)
             if df.empty: continue
-            if not all(c in df.columns for c in ['Date','Amount','Description']):
-                flash(f"File {file.filename} missing columns.", "danger")
-                continue
+
+            new_transactions = []
+            
             for _, row in df.iterrows():
                 try:
                     dvals = row.get('Date')
@@ -595,25 +575,31 @@ def upload_file():
                     desc = str(row.get('Description', '')).strip()
                     amount = float(str(row.get('Amount')).replace('$','').replace(',',''))
                     if account.account_type == 'credit_card' and file.filename.lower().endswith('.csv') and amount > 0:
-                        amount = -amount # CSV usually positive for expense
+                        amount = -amount 
                     
-                    if Transaction.query.filter_by(account_id=account.id, date=date_val, amount=amount, original_description=desc).first():
-                        skipped += 1
-                        continue
                     payee = Payee.query.filter_by(name=desc.title()).first()
                     if not payee:
                         payee = Payee(name=desc.title())
                         db.session.add(payee)
                         db.session.commit()
-                    cat_id = apply_rules_to_payee(payee, uncat_id)
-                    db.session.add(Transaction(date=date_val, original_description=desc, amount=amount, payee_id=payee.id, category_id=cat_id, account_id=account.id))
+                    
+                    cat_id = apply_rules_to_payee(payee, uncat_id, amount)
+                    
+                    new_transactions.append(
+                        Transaction(date=date_val, original_description=desc, amount=amount, payee_id=payee.id, category_id=cat_id, account_id=account.id)
+                    )
                     added += 1
                 except Exception as e: print(f"Row Error: {e}")
-            db.session.commit()
+            
+            if new_transactions:
+                db.session.add_all(new_transactions)
+                db.session.commit()
+                
         except Exception as e:
             db.session.rollback()
             flash(f"File Error {file.filename}: {e}", "danger")
-    flash(f"Imported {added}. Skipped {skipped} duplicates.", "success")
+            
+    flash(f"Imported {added} transactions.", "success")
     return redirect(url_for('index'))
 
 @app.route('/manage_payees')
@@ -625,7 +611,18 @@ def manage_payees():
         term = f"%{search_query}%"
         query = query.filter(or_(Payee.name.ilike(term), PayeeRule.display_name.ilike(term)))
     payees = query.order_by(case((Payee.rule_id == None, 1), else_=0).desc(), Payee.name).all()
-    return render_template('manage_payees.html', payees_data=payees, rules=rules, search_query=search_query)
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = 100
+    # Pagination logic (manual slicing because query structure is complex)
+    total = len(payees)
+    start = (page - 1) * per_page
+    end = start + per_page
+    payees_paginated = payees[start:end]
+    has_next = end < total
+    has_prev = start > 0
+    
+    return render_template('manage_payees.html', payees_data=payees_paginated, rules=rules, search_query=search_query, page=page, has_next=has_next, has_prev=has_prev)
 
 @app.route('/manage_payees/add', methods=['POST'])
 def add_payee():
@@ -667,7 +664,7 @@ def link_payee():
     payee.rule_id = new_rule_id
     Transaction.query.filter_by(payee_id=payee.id).update({'category_id': new_cat_id}, synchronize_session=False)
     db.session.commit()
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'new_category_name': Category.query.get(new_cat_id).name})
 
 @app.route('/manage_rules', methods=['GET','POST'])
 def manage_rules():
@@ -676,17 +673,22 @@ def manage_rules():
         frag = request.form.get('fragment', '').strip().upper()
         disp = request.form.get('display_name', '').strip()
         cat = request.form.get('category_id')
+        m_type = request.form.get('match_type', 'any')
+        
         if rule_id:
             r = db.session.get(PayeeRule, rule_id)
-            if r: r.fragment, r.display_name, r.category_id = frag, disp, cat
-            run_rule_on_all_payees(r, overwrite=False)
-        elif not PayeeRule.query.filter_by(fragment=frag).first():
-            new_rule = PayeeRule(fragment=frag, display_name=disp, category_id=cat)
+            if r: 
+                r.fragment, r.display_name, r.category_id, r.match_type = frag, disp, cat, m_type
+                run_rule_on_all_payees(r, overwrite=False)
+        elif not PayeeRule.query.filter_by(fragment=frag, match_type=m_type).first():
+            new_rule = PayeeRule(fragment=frag, display_name=disp, category_id=cat, match_type=m_type)
             db.session.add(new_rule)
             db.session.commit()
             run_rule_on_all_payees(new_rule, overwrite=False)
+        
         db.session.commit()
         return redirect(url_for('manage_rules'))
+        
     search_query = request.args.get('search', '').strip()
     query = PayeeRule.query.join(Category)
     if search_query:
@@ -716,7 +718,7 @@ def apply_rule_force(rule_id):
     rule = db.session.get(PayeeRule, rule_id)
     if rule:
         count = run_rule_on_all_payees(rule, overwrite=True)
-        flash(f"Applied rule to {count} payees.", "success")
+        flash(f"Applied rule to {count} payees/transactions.", "success")
     else: flash("Rule not found.", "danger")
     return redirect(url_for('manage_rules'))
 
@@ -733,6 +735,7 @@ def categorize():
     if request.method == 'POST':
         transaction_id = request.form.get('transaction_id')
         category_id_str = request.form.get('category_id')
+        save_one = request.form.get('save_one') == 'true'
         frag = request.form.get('rule_fragment', '').strip().upper()
         disp = request.form.get('payee_display_name', '').strip()
         c_filt = request.form.get('current_filter', 'all')
@@ -740,41 +743,52 @@ def categorize():
         c_year = request.form.get('current_year', '')
         c_month = request.form.get('current_month', '')
         
-        if transaction_id and category_id_str and frag and disp:
+        if transaction_id and category_id_str:
             try:
                 t = db.session.get(Transaction, transaction_id)
                 cat_id = int(category_id_str) 
                 if t:
-                    rule = PayeeRule.query.filter_by(fragment=frag).first()
-                    if rule:
-                        rule.display_name = disp
-                        rule.category_id = cat_id
-                        flash_msg = "Updated rule."
-                    else:
-                        rule = PayeeRule(fragment=frag, display_name=disp, category_id=cat_id)
-                        db.session.add(rule)
-                        flash_msg = "Created rule."
-                    db.session.commit()
-                    t.payee.rule_id = rule.id
-                    t.category_id = cat_id
-                    db.session.commit()
-                    count = run_rule_on_all_payees(rule, overwrite=True)
-                    flash(f"{flash_msg} Applied to {count + 1} transactions.", "success")
-            except ValueError:
-                flash("Invalid Category ID.", "danger")
-            except Exception as e:
-                db.session.rollback()
-                flash(f"Error: {e}", "danger")
-        else:
-            flash("Missing required fields.", "danger")
+                    if save_one:
+                        t.category_id = cat_id
+                        db.session.commit()
+                        flash("Updated single transaction.", "success")
+                    elif frag and disp:
+                        m_type = 'any'
+                        if t.amount < 0: m_type = 'negative'
+                        elif t.amount > 0: m_type = 'positive'
+
+                        rule = PayeeRule.query.filter_by(fragment=frag, match_type=m_type).first()
+                        
+                        if rule:
+                            rule.display_name = disp
+                            rule.category_id = cat_id
+                            flash_msg = f"Updated rule ({m_type})."
+                        else:
+                            rule = PayeeRule(fragment=frag, display_name=disp, category_id=cat_id, match_type=m_type)
+                            db.session.add(rule)
+                            flash_msg = f"Created rule ({m_type})."
+                        
+                        db.session.commit()
+                        t.payee.rule_id = rule.id
+                        t.category_id = cat_id
+                        db.session.commit()
+                        count = run_rule_on_all_payees(rule, overwrite=True)
+                        flash(f"{flash_msg} Applied to {count + 1} transactions.", "success")
+            except ValueError: flash("Invalid Category ID.", "danger")
+            except Exception as e: db.session.rollback(); flash(f"Error: {e}", "danger")
+        else: flash("Missing required fields.", "danger")
         return redirect(url_for('categorize', filter_type=c_filt, search=c_srch, year=c_year, month=c_month))
 
     filt = request.args.get('filter_type', 'all')
     srch = request.args.get('search', '').strip()
     year = request.args.get('year', '')
     month = request.args.get('month', '')
+    uncat_category = Category.query.filter_by(name='Uncategorized').first()
     q = Transaction.query.join(Payee).filter(Transaction.is_deleted == False)
-    if not srch: q = q.filter(Payee.rule_id == None)
+    
+    if not srch and uncat_category: 
+        q = q.filter(Transaction.category_id == uncat_category.id)
+        
     if filt == 'positive': q = q.filter(Transaction.amount > 0)
     elif filt == 'negative': q = q.filter(Transaction.amount < 0)
     if year and year != 'all': q = q.filter(extract('year', Transaction.date) == int(year))
@@ -788,7 +802,8 @@ def categorize():
         grouped[c.type].append(c)
     labels = [r.display_name for r in db.session.query(PayeeRule.display_name).distinct().order_by(PayeeRule.display_name).all()]
     available_years = [int(y[0]) for y in db.session.query(extract('year', Transaction.date)).distinct().order_by(extract('year', Transaction.date).desc()).all()]
-    return render_template('categorize.html', transactions=txs, grouped_categories=grouped, filter_type=filt, search_query=srch, selected_year=year, selected_month=month, available_years=available_years, existing_labels=labels)
+    month_choices = [(str(i), calendar.month_name[i]) for i in range(1, 13)]
+    return render_template('categorize.html', transactions=txs, grouped_categories=grouped, filter_type=filt, search_query=srch, selected_year=year, selected_month=month, available_years=available_years, existing_labels=labels, month_choices=month_choices)
 
 @app.route('/edit_transactions', defaults={'month_offset': '0'}, methods=['GET','POST'])
 @app.route('/edit_transactions/<string:month_offset>', methods=['GET','POST'])
@@ -801,15 +816,42 @@ def edit_transactions(month_offset):
         current_context = f"Search Results: '{srch}'"
         query = Transaction.query.join(Payee).filter(or_(Payee.name.ilike(f"%{srch}%"), Transaction.original_description.ilike(f"%{srch}%")))
     else:
-        current_context = summary['current_month_name']
-        query = Transaction.query.join(Payee).filter(Transaction.date >= summary['start_date'], Transaction.date <= summary['end_date'])
-    txs = query.order_by(Transaction.date.desc()).all()
+        req_year = request.args.get('year')
+        req_month = request.args.get('month')
+        if req_year and req_month:
+             query = Transaction.query.join(Payee).filter(extract('year', Transaction.date) == int(req_year), extract('month', Transaction.date) == int(req_month))
+             current_context = f"Filter: {calendar.month_name[int(req_month)]} {req_year}"
+        elif req_year:
+             query = Transaction.query.join(Payee).filter(extract('year', Transaction.date) == int(req_year))
+             current_context = f"Filter: {req_year}"
+        else:
+             current_context = summary['current_month_name']
+             query = Transaction.query.join(Payee).filter(Transaction.date >= summary['start_date'], Transaction.date <= summary['end_date'])
+
+    sort_by = request.args.get('sort_by', 'date')
+    sort_order = request.args.get('sort_order', 'desc')
+
+    if sort_by == 'payee': sort_attr = Payee.name
+    elif sort_by == 'amount': sort_attr = Transaction.amount
+    elif sort_by == 'category': sort_attr = Category.name; query = query.join(Category)
+    elif sort_by == 'account': sort_attr = Account.name; query = query.join(Account)
+    else: sort_attr = Transaction.date
+
+    if sort_order == 'asc': query = query.order_by(sort_attr.asc())
+    else: query = query.order_by(sort_attr.desc())
+
+    if sort_by != 'date': query = query.order_by(Transaction.date.desc())
+
+    txs = query.all()
+    available_years = [int(y[0]) for y in db.session.query(extract('year', Transaction.date)).distinct().order_by(extract('year', Transaction.date).desc()).all()]
+    month_choices = [(str(i), calendar.month_name[i]) for i in range(1, 13)]
     cats = Category.query.order_by(Category.type, Category.name).all()
     grouped = {}
     for c in cats:
         if c.type not in grouped: grouped[c.type] = []
         grouped[c.type].append(c)
-    return render_template('edit_transactions.html', transactions=txs, payees=Payee.query.order_by(Payee.name).all(), grouped_categories=grouped, accounts=Account.query.all(), month_offset=month_offset, current_month_name=current_context, search_query=srch)
+        
+    return render_template('edit_transactions.html', transactions=txs, payees=Payee.query.order_by(Payee.name).all(), grouped_categories=grouped, accounts=Account.query.all(), month_offset=month_offset, current_month_name=current_context, search_query=srch, available_years=available_years, month_choices=month_choices, selected_year=request.args.get('year'), selected_month=request.args.get('month'), sort_by=sort_by, sort_order=sort_order)
 
 @app.route('/update_transaction/<int:t_id>', methods=['POST'])
 def update_transaction(t_id):
@@ -829,9 +871,6 @@ def update_transaction(t_id):
 @app.route('/edit_accounts')
 def edit_accounts():
     accs = Account.query.order_by(Account.name).all()
-    for a in accs:
-        net = db.session.query(func.sum(Transaction.amount)).filter(Transaction.account_id==a.id, Transaction.is_deleted==False).scalar() or 0
-        a.current_balance = float(a.starting_balance) + float(net)
     return render_template('edit_account_balances.html', accounts=accs, account_types=['checking','savings','credit_card'])
 
 @app.route('/add_account', methods=['POST'])
@@ -847,7 +886,7 @@ def add_account():
 def update_account():
     a = db.session.get(Account, request.form.get('account_id'))
     if a:
-        a.name, a.account_type, a.starting_balance = request.form.get('name'), request.form.get('account_type'), float(request.form.get('starting_balance'))
+        a.name, a.account_type = request.form.get('name'), request.form.get('account_type') 
         db.session.commit()
     return redirect(url_for('edit_accounts'))
 
@@ -856,14 +895,6 @@ def delete_account(acc_id):
     Account.query.filter_by(id=acc_id).delete()
     db.session.commit()
     return redirect(url_for('edit_accounts'))
-
-@app.route('/calculate_starting_balance/<int:account_id>', methods=['POST'])
-def calculate_starting_balance(account_id):
-    try:
-        curr = float(request.get_json().get('current_actual_balance', '0').replace('$','').replace(',',''))
-        net = db.session.query(func.sum(Transaction.amount)).filter(Transaction.account_id == account_id, Transaction.is_deleted == False).scalar() or 0
-        return jsonify({'success': True, 'new_starting_balance': f"{curr - float(net):.2f}"})
-    except Exception as e: return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/manage_categories', methods=['GET','POST'])
 def manage_categories():

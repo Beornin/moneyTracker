@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit Accounts & Balances</title>
-    <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+    <title>Edit Accounts</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
         }
     </script>
 
-    <!-- NEW: Font Awesome CDN -->
-<link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
@@ -24,27 +24,8 @@
         .flash { padding: 1rem; margin-bottom: 1rem; border-radius: 0.375rem; }
         .flash.success { background-color: #d1fae5; color: #065f46; }
         .flash.danger { background-color: #fee2e2; color: #991b1b; }
-        /* Dark mode flash overrides */
         .dark .flash.success { background-color: #064e3b; color: #d1fae5; }
         .dark .flash.danger { background-color: #7f1d1d; color: #fee2e2; }
-        
-        .calculating .fa-calculator {
-            display: none;
-        }
-        .calculating .calc-text {
-            display: none;
-        }
-        .calculating .fa-spinner {
-            display: inline-block;
-            animation: spin 1s linear infinite;
-        }
-        .fa-spinner {
-            display: none;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 font-sans leading-normal tracking-normal min-h-screen transition-colors duration-200">
@@ -52,14 +33,15 @@
     <div class="container mx-auto max-w-7xl p-6">
         
         <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-6 border-b dark:border-gray-700 pb-2">
-            <i class="fa-solid fa-landmark mr-3 text-gray-700 dark:text-gray-300"></i><span class="align-middle">Edit Accounts & Starting Balances</span>
+            <i class="fa-solid fa-landmark mr-3 text-gray-700 dark:text-gray-300"></i><span class="align-middle">Edit Accounts</span>
         </h1>
 
-        <div class="flex justify-start mb-6">
+        <div class="flex justify-between items-center mb-6">
             <a href="{{ url_for('index') }}" class="flex items-center text-sm font-medium px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
                 <i class="fa-solid fa-arrow-left mr-2"></i>
                 Back to Dashboard
             </a>
+            <div></div>
         </div>
 
         <div id="flash-container">
@@ -81,11 +63,9 @@
                 <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                     <thead class="bg-gray-50 dark:bg-gray-700">
                         <tr>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/4">Account Name</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/6 min-w-[150px]">Type</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/6 min-w-[120px]">Current Balance (Live)</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/6 min-w-[150px]">Starting Balance (Day 1)</th>
-                            <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/6">Actions</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/2">Account Name</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/4">Type</th>
+                            <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/4">Actions</th>
                         </tr>
                     </thead>
                     <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -110,44 +90,14 @@
                                     </select>
                                 </td>
 
-                                <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-700 dark:text-gray-300">
-                                    <span class="text-gray-500 dark:text-gray-400 mr-1">$</span>
-                                    <span id="current_balance_{{ acc.id }}">{{ "%.2f" | format(acc.current_balance) }}</span>
-                                </td>
-
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                                    <div class="relative">
-                                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <span class="text-gray-500 dark:text-gray-400 text-sm">$</span>
-                                        </div>
-                                        <input type="number" name="starting_balance" 
-                                               id="starting_balance_{{ acc.id }}"
-                                               value="{{ '%.2f' | format(acc.starting_balance | float) }}" 
-                                               step="0.01" required
-                                               class="w-full pl-7 pr-3 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm p-2">
-                                    </div>
-                                    <p class="text-xs text-gray-400 mt-1">
-                                        Adjusts current balance.
-                                    </p>
-                                </td>
-
                                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                    <div class="flex flex-col space-y-2">
-                                        <button type="submit" class="text-white bg-indigo-600 hover:bg-indigo-700 font-bold px-3 py-2 rounded-lg transition duration-150 shadow-md flex items-center justify-center">
+                                    <div class="flex flex-col space-y-2 items-end">
+                                        <button type="submit" class="text-white bg-indigo-600 hover:bg-indigo-700 font-bold px-3 py-2 rounded-lg transition duration-150 shadow-md flex items-center justify-center w-24">
                                             <i class="fa-solid fa-save mr-2"></i>Save
                                         </button>
-                                        <button type="button" 
-                                                onclick="calculateBalance({{ acc.id }})"
-                                                id="calc_button_{{ acc.id }}"
-                                                class="text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-600 bg-indigo-100 dark:bg-indigo-900/30 hover:bg-indigo-200 dark:hover:bg-indigo-800 px-3 py-2 rounded-lg transition duration-150 text-xs font-semibold flex items-center justify-center">
-                                            <i class="fa-solid fa-calculator mr-2"></i>
-                                            <span class="calc-text">Calc from Current</span>
-                                            <i class="fa-solid fa-spinner"></i>
-                                        </button>
-                                        <!-- Add Delete Button -->
                                         <form action="{{ url_for('delete_account', acc_id=acc.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this account? All associated transactions will be PERMANENTLY deleted.')" class="contents">
                                             <button type="submit"
-                                                    class="text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-800 px-3 py-2 rounded-lg transition duration-150 text-xs font-semibold flex items-center justify-center">
+                                                    class="text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-800 px-3 py-2 rounded-lg transition duration-150 text-xs font-semibold flex items-center justify-center w-24">
                                                 <i class="fa-solid fa-trash-can mr-2"></i>
                                                 <span>Delete</span>
                                             </button>
@@ -179,71 +129,6 @@
                 setTimeout(() => flashContainer.innerHTML = '', 500);
             }
         }, 5000);
-
-        // This function now calls the new route in app.py
-        async function calculateBalance(accountId) {
-            const button = document.getElementById(`calc_button_${accountId}`);
-            const balanceInput = document.getElementById(`starting_balance_${accountId}`);
-
-            let currentBalance;
-            let currentBalanceStr = '';
-            
-            while (true) {
-                currentBalanceStr = prompt(`Please enter the current ACTUAL balance for this account.\nExample: 1200.50`);
-                if (currentBalanceStr === null) return; 
-                
-                const cleanedStr = currentBalanceStr.replace(/[$,]/g, '').trim();
-
-                if (!cleanedStr) {
-                    alert('Balance cannot be empty.');
-                    continue;
-                }
-                currentBalance = parseFloat(cleanedStr);
-                if (isNaN(currentBalance)) {
-                    alert('Invalid number format.');
-                    continue;
-                }
-                break;
-            }
-
-            button.classList.add('calculating');
-            
-            try {
-                // FIX: This route now exists in app.py
-                const response = await fetch(`/calculate_starting_balance/${accountId}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        current_actual_balance: currentBalanceStr // Send the string, let backend parse
-                    })
-                });
-
-                const result = await response.json();
-                
-                if (result.success) {
-                    const newBalance = parseFloat(result.new_starting_balance).toFixed(2);
-                    balanceInput.value = newBalance;
-                    
-                    const currentDisplay = document.getElementById(`current_balance_${accountId}`);
-                    if (currentDisplay) {
-                        currentDisplay.textContent = currentBalance.toFixed(2);
-                        // Highlight the row briefly
-                        currentDisplay.closest('tr').classList.add('bg-green-100', 'dark:bg-green-900');
-                        setTimeout(() => currentDisplay.closest('tr').classList.remove('bg-green-100', 'dark:bg-green-900'), 2000);
-                    }
-                } else {
-                    alert('Calculation Error: ' + result.message);
-                }
-
-            } catch (error) {
-                console.error('Fetch error:', error);
-                alert('A network error occurred.');
-            } finally {
-                button.classList.remove('calculating');
-            }
-        }
     </script>
 </body>
 </html>

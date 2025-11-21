@@ -31,20 +31,17 @@
         }
         .tooltip-text {
             visibility: hidden;
-            width: 280px; /* Slightly reduced width for mobile safety */
-            background-color: #374151; /* gray-700 */
-            color: #f3f4f6; /* gray-100 */
+            width: 280px; 
+            background-color: #374151; 
+            color: #f3f4f6; 
             text-align: left;
             border-radius: 6px;
             padding: 12px;
             position: absolute;
-            z-index: 100; /* Increased Z-index */
-            bottom: 135%; /* Position above icon */
-            
-            /* FIX: Align left edge with icon, don't center */
+            z-index: 100; 
+            bottom: 135%; 
             left: -10px; 
             margin-left: 0;
-            
             opacity: 0;
             transition: opacity 0.3s;
             font-size: 0.85rem;
@@ -53,12 +50,11 @@
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
         
-        /* Little triangle arrow at the bottom left */
         .tooltip-text::after {
             content: "";
             position: absolute;
             top: 100%;
-            left: 15px; /* Align arrow with the icon */
+            left: 15px; 
             margin-left: -5px;
             border-width: 5px;
             border-style: solid;
@@ -66,8 +62,8 @@
         }
         
         .dark .tooltip-text {
-            background-color: #e5e7eb; /* gray-200 */
-            color: #1f2937; /* gray-800 */
+            background-color: #e5e7eb; 
+            color: #1f2937; 
             border: 1px solid #d1d5db;
         }
         .dark .tooltip-text::after {
@@ -118,6 +114,13 @@
         
         <div class="flex flex-wrap items-center justify-end mb-8 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md transition-colors duration-200">
             <div class="flex flex-wrap gap-2 items-center">
+                
+                <label class="inline-flex items-center cursor-pointer mr-4">
+                    <input type="checkbox" id="ai-toggle" class="sr-only peer">
+                    <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                    <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300"><i class="fa-solid fa-robot mr-1"></i>AI Insights</span>
+                </label>
+
                 <button id="theme-toggle" type="button" class="text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-2.5">
                     <svg id="theme-toggle-dark-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
                     <svg id="theme-toggle-light-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 100 2h1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
@@ -125,25 +128,34 @@
 
                 <a href="{{ url_for('trends') }}" 
                    class="flex items-center px-4 py-2 border border-purple-500 text-purple-700 dark:text-purple-400 font-semibold rounded-md bg-purple-50 dark:bg-purple-900 hover:bg-purple-100 dark:hover:bg-purple-800 transition duration-150">
-                    <i class="fa-solid fa-chart-line mr-2"></i>Trend Analysis
+                    <i class="fa-solid fa-chart-line mr-2"></i>Trends
                 </a>
                 <a href="{{ url_for('categorize') }}" 
                    class="flex items-center px-4 py-2 border border-yellow-500 text-yellow-700 dark:text-yellow-400 font-semibold rounded-md bg-yellow-50 dark:bg-yellow-900 hover:bg-yellow-100 dark:hover:bg-yellow-800 transition duration-150">
-                    <i class="fa-solid fa-tags mr-2"></i>Review Transactions ({{ summary.uncategorized_count }})
+                    <i class="fa-solid fa-tags mr-2"></i>Review ({{ summary.uncategorized_count }})
                 </a>
                 <a href="{{ url_for('manage_categories') }}" 
                    class="flex items-center px-4 py-2 border border-teal-500 text-teal-700 dark:text-teal-400 font-semibold rounded-md bg-teal-50 dark:bg-teal-900 hover:bg-teal-100 dark:hover:bg-teal-800 transition duration-150">
-                    <i class="fa-solid fa-sitemap mr-2"></i>Manage Categories
+                    <i class="fa-solid fa-sitemap mr-2"></i>Categories
                 </a>
                 <a href="{{ url_for('edit_transactions', month_offset=month_offset) }}" 
                    class="flex items-center px-4 py-2 border border-indigo-500 text-indigo-700 dark:text-indigo-400 font-semibold rounded-md bg-indigo-50 dark:bg-indigo-900 hover:bg-indigo-100 dark:hover:bg-indigo-800 transition duration-150">
-                    <i class="fa-solid fa-pen-to-square mr-2"></i>Edit Transactions
+                    <i class="fa-solid fa-pen-to-square mr-2"></i>Transactions
+                </a>
+                <a href="{{ url_for('manage_payees') }}" 
+                   class="flex items-center px-4 py-2 border border-cyan-500 text-cyan-700 dark:text-cyan-400 font-semibold rounded-md bg-cyan-50 dark:bg-cyan-900 hover:bg-cyan-100 dark:hover:bg-cyan-800 transition duration-150">
+                    <i class="fa-solid fa-users mr-2"></i>Payees
+                </a>
+
+                <a href="{{ url_for('manage_rules') }}" 
+                   class="flex items-center px-4 py-2 border border-slate-500 text-slate-700 dark:text-slate-400 font-semibold rounded-md bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition duration-150">
+                    <i class="fa-solid fa-ruler-combined mr-2"></i>Rules
                 </a>
                 <a href="{{ url_for('events') }}" class="flex items-center px-4 py-2 text-sm font-medium text-white bg-pink-600 rounded-lg hover:bg-pink-700 transition duration-300 shadow-md">
-                    <i class="fa-solid fa-calendar mr-2"></i>Dates of Interest
+                    <i class="fa-solid fa-calendar mr-2"></i>Events
                 </a>
                 <a href="{{ url_for('edit_accounts') }}" class="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition duration-300 shadow-md">
-                    <i class="fa-solid fa-landmark mr-2"></i>Edit Accounts
+                    <i class="fa-solid fa-landmark mr-2"></i>Accounts
                 </a>
             </div>
         </div>
@@ -207,7 +219,7 @@
             </div>
         </div>
 
-        <div class="mb-8">
+        <div id="monthly-insights-card" class="mb-8 hidden">
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700">
                 <div class="flex justify-between items-center mb-4">
                     <h3 id="monthly-insights-title" class="text-xl font-semibold text-gray-800 dark:text-gray-200">
@@ -225,7 +237,7 @@
             </div>
         </div>
         
-        <div class="mb-8">
+        <div id="yearly-insights-card" class="mb-8 hidden">
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200">
@@ -249,11 +261,10 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question:</strong> Am I spending less than I earn?<br><br>
-                        <strong>The Math:</strong><br>
-                        <span class="text-green-400">Income</span> = Salary + Dividends + Transfers from External Banks.<br>
-                        <span class="text-red-400">Expense</span> = Spending - Refunds.<br><br>
-                        <strong>Contra-Expense Applied:</strong> If you spend $100 and get a $20 refund, this chart shows $80 net expense. Refunds do NOT count as Income here, they reduce expense.
+                        <strong>Goal:</strong> Calculate true Profit/Loss.<br><br>
+                        <strong>Inflow:</strong> Strictly 'Income' category (e.g., Salary).<br>
+                        <strong>Outflow:</strong> Strictly 'Expense' category.<br>
+                        <strong>Ignored:</strong> Transfers of any kind.
                     </span>
                 </div>
                 <div id="chart-income-expense" class="w-full h-full"></div>
@@ -263,11 +274,10 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question:</strong> How much liquid cash actually moved this month?<br><br>
-                        <strong>The Math:</strong><br>
-                        <span class="text-green-400">Total Inflow</span> = Sum of ALL positive transactions (Income + Refunds + Transfers In).<br>
-                        <span class="text-red-400">Total Outflow</span> = Sum of ALL negative transactions (Expenses + Transfers Out).<br><br>
-                        <strong>Vs. Budget:</strong> Unlike the Income/Expense chart, this INCLUDES debt payments and transfers to show true liquidity movement.
+                        <strong>Goal:</strong> Track total liquidity (money in vs out).<br><br>
+                        <strong>Inflow:</strong> Income + Refunds + Positive 'Savings/Investment Transfer'.<br>
+                        <strong>Outflow:</strong> Expenses + Negative 'Savings/Investment Transfer'.<br>
+                        <strong>Note:</strong> Ignores internal credit card payments.
                     </span>
                 </div>
                 <div id="chart-cash-flow" class="w-full h-full"></div>
@@ -280,27 +290,22 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question:</strong> Can I control my day-to-day variable spending?<br><br>
-                        <strong>The Math:</strong><br>
-                        This matches the Budget chart but <u>excludes</u> large fixed costs like <strong>Car Payments</strong> and <strong>Insurance</strong>.<br><br>
-                        <strong>Goal:</strong> The yellow line (Surplus) should be positive. If negative, you are overspending on lifestyle (food, shopping, travel).
+                        <strong>Goal:</strong> Measure daily lifestyle sustainability.<br><br>
+                        <strong>Excluded:</strong> Large fixed costs (Rent, Car, Insurance, VUL).<br>
+                        <strong>Focus:</strong> Variable spending (Food, Shopping) vs Income.
                     </span>
                 </div>
                 <div id="chart-core-operating" class="w-full h-full"></div>
             </div>
 
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-green-200 dark:border-green-900 h-[600px] relative">
-                <div class="absolute top-4 left-4 z-10 tooltip-container">
-                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-green-500 cursor-pointer text-lg"></i>
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[600px] relative">
+                 <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question:</strong> Is my savings nest egg growing?<br><br>
-                        <strong>The Math:</strong><br>
-                        <span class="text-green-400">Green Bar</span> = Money moving INTO Savings accounts.<br>
-                        <span class="text-red-400">Red Bar</span> = Money moving OUT of Savings accounts.<br><br>
-                        <strong>Note:</strong> This only tracks accounts explicitly marked as 'Savings' type.
+                        <strong>Goal:</strong> Total aggregated view of Core Operations over the full time period.
                     </span>
                 </div>
-                <div id="chart-savings" class="w-full h-full"></div>
+                <div id="chart-core-summary" class="w-full h-full"></div>
             </div>
         </div>
 
@@ -313,8 +318,7 @@
                         <strong>Question:</strong> Where exactly is my money going?<br><br>
                         <strong>The Math:</strong><br>
                         Sum of Net spending per category. <br>
-                        <strong>Contra-Expense Applied:</strong> If you spent $500 on Shopping but returned $500, this chart shows <strong>$0</strong> (Net), not $1000 of activity. If refunds exceed spending, it shows $0.<br><br>
-                        <strong>Excludes:</strong> Credit Card Payments & System Transfers.
+                        <strong>Contra-Expense Applied:</strong> Refunds reduce the total expense bar for that category.
                     </span>
                 </div>
                 <div id="chart-expense-broad" class="w-full h-full"></div>
@@ -325,9 +329,7 @@
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-purple-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
                         <strong>Question:</strong> Who are my biggest vendors?<br><br>
-                        <strong>The Math:</strong><br>
-                        Total spent at specific merchants over the last 18 months.<br><br>
-                        <strong>Grouping:</strong> Uses your Payee Rules (e.g., 'Publix #123' and 'Publix #456' both count as 'Publix').
+                        <strong>Logic:</strong> Groups raw bank transactions by your defined Payee Rules.
                     </span>
                 </div>
                 <div id="chart-top-expenses" class="w-full h-full"></div>
@@ -348,7 +350,7 @@
                 </div>
                 <div id="chart-yoy-comparison" class="w-full h-full"></div>
             </div>
-
+            
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
@@ -362,6 +364,20 @@
                 <div id="chart-groceries" class="w-full h-full"></div>
             </div>
 
+        </div>
+
+        <div class="w-full mb-8">
+             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-green-200 dark:border-green-900 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-green-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Goal:</strong> Track savings rate.<br><br>
+                        <strong>Green Bar:</strong> Money moved INTO a 'Savings' account.<br>
+                        <strong>Red Bar:</strong> Money moved OUT of a 'Savings' account.
+                    </span>
+                </div>
+                <div id="chart-savings" class="w-full h-full"></div>
+            </div>
         </div>
 
         <script>
@@ -397,15 +413,17 @@
                 const plot6 = {{ chart_expense_broad|safe if chart_expense_broad else 'null' }};
                 const plot7 = {{ chart_top_payees|safe if chart_top_payees else 'null' }};
                 const plot8 = {{ chart_yoy|safe if chart_yoy else 'null' }};
+                const plot9 = {{ chart_core_summary|safe if chart_core_summary else 'null' }}; // NEW CHART
 
                 renderChart(plot1, 'chart-income-expense');
-                renderChart(plot2, 'chart-savings');
                 renderChart(plot3, 'chart-cash-flow');
                 renderChart(plot4, 'chart-core-operating');
-                renderChart(plot5, 'chart-groceries');
+                renderChart(plot9, 'chart-core-summary'); // Render New Chart in Grid 2
                 renderChart(plot6, 'chart-expense-broad');
                 renderChart(plot7, 'chart-top-expenses');
                 renderChart(plot8, 'chart-yoy-comparison');
+                renderChart(plot5, 'chart-groceries');
+                renderChart(plot2, 'chart-savings'); // Render Savings at bottom
             }
 
             var themeToggleBtn = document.getElementById('theme-toggle');
@@ -447,7 +465,22 @@
 
             // --- AI Insights Generators ---
             document.addEventListener('DOMContentLoaded', function() {
-                // File Upload Spinner
+                const aiToggle = document.getElementById('ai-toggle');
+                const monthlyCard = document.getElementById('monthly-insights-card');
+                const yearlyCard = document.getElementById('yearly-insights-card');
+
+                aiToggle.addEventListener('change', function() {
+                    if(this.checked) {
+                        monthlyCard.classList.remove('hidden');
+                        yearlyCard.classList.remove('hidden');
+                        generateMonthlyInsights(false);
+                        generateYearlyInsights(false);
+                    } else {
+                        monthlyCard.classList.add('hidden');
+                        yearlyCard.classList.add('hidden');
+                    }
+                });
+
                 const uploadForm = document.getElementById('upload-form');
                 if (uploadForm) {
                     uploadForm.addEventListener('submit', function() {
@@ -459,9 +492,6 @@
                         document.getElementById('upload-text').textContent = 'Processing...';
                     });
                 }
-                
-                generateMonthlyInsights(false);
-                generateYearlyInsights(false);
 
                 document.getElementById('regenerate-monthly').addEventListener('click', () => generateMonthlyInsights(true));
                 document.getElementById('regenerate-yearly').addEventListener('click', () => generateYearlyInsights(true));

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit Transactions | {{ current_month_name }}</title>
+    <title>Edit Transactions</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -21,13 +21,6 @@
             document.documentElement.classList.remove('dark');
         }
     </script>
-    <style>
-        /* FIX: Force Select Options to be Dark in Dark Mode */
-        .dark select option {
-            background-color: #1f2937; /* tailwind gray-800 */
-            color: white;
-        }
-    </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
 
@@ -56,66 +49,63 @@
             {% endif %}
         {% endwith %}
 
-        <div class="flex flex-wrap items-center justify-between mb-6 p-4 bg-white dark:bg-gray-800 rounded-xl shadow-lg">
-            
+        <div class="flex justify-between items-center mb-6">
             <a href="{{ url_for('index', month_offset=month_offset) }}" class="flex items-center text-sm font-medium px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
                 <i class="fa-solid fa-arrow-left mr-2"></i>
-                Dashboard
+                Back to Dashboard
             </a>
 
-            <div class="flex items-center space-x-2 bg-gray-100 dark:bg-gray-700/50 p-1.5 rounded-lg border border-gray-200 dark:border-gray-600">
-                
-                <a href="{{ url_for('edit_transactions', month_offset=month_offset - 1, search=search_query) }}" 
-                   class="p-2 text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-white dark:hover:bg-gray-600 rounded-md transition">
-                    <i class="fa-solid fa-chevron-left"></i>
+            <div class="flex items-center space-x-4">
+                <a href="{{ url_for('edit_transactions', month_offset=month_offset - 1) }}" class="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition duration-150">
+                    <i class="fa-solid fa-chevron-left mr-1"></i> Previous
                 </a>
-
-                <select id="nav_month" onchange="jumpToDate()" 
-                        class="bg-transparent font-bold text-gray-800 dark:text-white text-sm focus:ring-0 border-none py-1 pl-2 pr-6 cursor-pointer">
-                    <option value="1" class="bg-white dark:bg-gray-800">January</option>
-                    <option value="2" class="bg-white dark:bg-gray-800">February</option>
-                    <option value="3" class="bg-white dark:bg-gray-800">March</option>
-                    <option value="4" class="bg-white dark:bg-gray-800">April</option>
-                    <option value="5" class="bg-white dark:bg-gray-800">May</option>
-                    <option value="6" class="bg-white dark:bg-gray-800">June</option>
-                    <option value="7" class="bg-white dark:bg-gray-800">July</option>
-                    <option value="8" class="bg-white dark:bg-gray-800">August</option>
-                    <option value="9" class="bg-white dark:bg-gray-800">September</option>
-                    <option value="10" class="bg-white dark:bg-gray-800">October</option>
-                    <option value="11" class="bg-white dark:bg-gray-800">November</option>
-                    <option value="12" class="bg-white dark:bg-gray-800">December</option>
-                </select>
-
-                <select id="nav_year" onchange="jumpToDate()" 
-                        class="bg-transparent font-bold text-gray-800 dark:text-white text-sm focus:ring-0 border-none py-1 pl-2 pr-6 cursor-pointer">
-                    </select>
-
-                <a href="{{ url_for('edit_transactions', month_offset=month_offset + 1, search=search_query) }}" 
-                   class="p-2 text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-white dark:hover:bg-gray-600 rounded-md transition">
-                    <i class="fa-solid fa-chevron-right"></i>
+                <span class="text-xl font-bold text-indigo-600 dark:text-indigo-400">{{ current_month_name }}</span>
+                <a href="{{ url_for('edit_transactions', month_offset=month_offset + 1) }}" class="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition duration-150">
+                    Next <i class="fa-solid fa-chevron-right ml-1"></i>
                 </a>
             </div>
         </div>
+        
+        <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md mb-6 border border-gray-200 dark:border-gray-700">
+             <form action="{{ url_for('edit_transactions') }}" method="GET" class="flex flex-wrap gap-4 items-end">
+                 <input type="hidden" name="sort_by" value="{{ sort_by }}">
+                 <input type="hidden" name="sort_order" value="{{ sort_order }}">
+                 
+                 <div class="flex-grow min-w-[200px]">
+                     <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Search</label>
+                     <input type="text" name="search" value="{{ search_query }}" placeholder="Search by Payee or Description..." 
+                            class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm p-2 text-sm focus:ring-blue-500 focus:border-blue-500">
+                 </div>
 
-        <div class="mb-6">
-            <form action="{{ url_for('edit_transactions', month_offset=month_offset) }}" method="GET" class="flex gap-2">
-                <div class="relative flex-grow">
-                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <i class="fa-solid fa-search text-gray-400"></i>
-                    </div>
-                    <input type="text" name="search" value="{{ search_query or '' }}" placeholder="Search payee or description..." 
-                           class="block w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-lg leading-5 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out">
-                    
-                    {% if search_query %}
-                        <a href="{{ url_for('edit_transactions', month_offset=month_offset) }}" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Clear Search">
-                            <i class="fa-solid fa-times-circle"></i>
-                        </a>
-                    {% endif %}
+                 <div class="w-32">
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Year</label>
+                    <select name="year" class="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">All Years</option>
+                        {% for y in available_years %}
+                            <option value="{{ y }}" {% if selected_year == y|string %}selected{% endif %}>{{ y }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
-                <button type="submit" class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-sm transition duration-150 flex items-center">
-                    Search
-                </button>
-            </form>
+
+                <div class="w-40">
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Month</label>
+                    <select name="month" class="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">All Months</option>
+                        {% for m_num, m_name in month_choices %}
+                            <option value="{{ m_num }}" {% if selected_month == m_num %}selected{% endif %}>
+                                {{ m_name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                 <div class="flex gap-2">
+                     <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">Filter</button>
+                     {% if search_query or selected_year or selected_month %}
+                        <a href="{{ url_for('edit_transactions') }}" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-md shadow-sm transition-colors flex items-center">Clear</a>
+                     {% endif %}
+                 </div>
+             </form>
         </div>
 
         <div class="bg-white dark:bg-gray-800 shadow-xl overflow-hidden rounded-lg">
@@ -123,15 +113,53 @@
             <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead class="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-10">
-                            <i class="fa-solid fa-trash-can" title="Delete?"></i>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <i class="fa-solid fa-trash-can w-4" title="Delete?"></i>
                         </th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Payee</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Amount</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Category</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Account</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                        
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <a href="{{ url_for('edit_transactions', month_offset=month_offset, sort_by='date', sort_order='asc' if sort_by=='date' and sort_order=='desc' else 'desc', search=search_query, year=selected_year, month=selected_month) }}" class="flex items-center hover:text-indigo-600 dark:hover:text-indigo-400">
+                                <i class="fa-solid fa-calendar-days w-4 mr-1"></i>Date
+                                {% if sort_by == 'date' %}
+                                    <i class="fa-solid fa-sort-{{ 'up' if sort_order=='asc' else 'down' }} ml-1"></i>
+                                {% endif %}
+                            </a>
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <a href="{{ url_for('edit_transactions', month_offset=month_offset, sort_by='payee', sort_order='asc' if sort_by=='payee' and sort_order=='desc' else 'desc', search=search_query, year=selected_year, month=selected_month) }}" class="flex items-center hover:text-indigo-600 dark:hover:text-indigo-400">
+                                <i class="fa-solid fa-user w-4 mr-1"></i>Payee
+                                {% if sort_by == 'payee' %}
+                                    <i class="fa-solid fa-sort-{{ 'up' if sort_order=='asc' else 'down' }} ml-1"></i>
+                                {% endif %}
+                            </a>
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <a href="{{ url_for('edit_transactions', month_offset=month_offset, sort_by='amount', sort_order='asc' if sort_by=='amount' and sort_order=='desc' else 'desc', search=search_query, year=selected_year, month=selected_month) }}" class="flex items-center hover:text-indigo-600 dark:hover:text-indigo-400">
+                                <i class="fa-solid fa-dollar-sign w-4 mr-1"></i>Amount
+                                {% if sort_by == 'amount' %}
+                                    <i class="fa-solid fa-sort-{{ 'up' if sort_order=='asc' else 'down' }} ml-1"></i>
+                                {% endif %}
+                            </a>
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <a href="{{ url_for('edit_transactions', month_offset=month_offset, sort_by='category', sort_order='asc' if sort_by=='category' and sort_order=='desc' else 'desc', search=search_query, year=selected_year, month=selected_month) }}" class="flex items-center hover:text-indigo-600 dark:hover:text-indigo-400">
+                                <i class="fa-solid fa-tag w-4 mr-1"></i>Category
+                                {% if sort_by == 'category' %}
+                                    <i class="fa-solid fa-sort-{{ 'up' if sort_order=='asc' else 'down' }} ml-1"></i>
+                                {% endif %}
+                            </a>
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <a href="{{ url_for('edit_transactions', month_offset=month_offset, sort_by='account', sort_order='asc' if sort_by=='account' and sort_order=='desc' else 'desc', search=search_query, year=selected_year, month=selected_month) }}" class="flex items-center hover:text-indigo-600 dark:hover:text-indigo-400">
+                                <i class="fa-solid fa-landmark w-4 mr-1"></i>Account
+                                {% if sort_by == 'account' %}
+                                    <i class="fa-solid fa-sort-{{ 'up' if sort_order=='asc' else 'down' }} ml-1"></i>
+                                {% endif %}
+                            </a>
+                        </th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <i class="fa-solid fa-bolt w-4 mr-1"></i>Actions
+                        </th>
                     </tr>
                 </thead>
                 <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -164,6 +192,13 @@
                                    list="payee_list"
                                    form="form-{{ t.id }}"
                                    class="w-full min-w-[200px] border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm p-1">
+                            
+                            {% if t.payee.rule %}
+                            <div class="text-[10px] text-gray-500 dark:text-gray-400 mt-1 flex items-center">
+                                <i class="fa-solid fa-link mr-1 text-indigo-400"></i>
+                                Graph Label: <span class="font-semibold text-indigo-600 dark:text-indigo-300 ml-1">{{ t.payee.rule.display_name }}</span>
+                            </div>
+                            {% endif %}
                         </td>
                 
                         <td class="px-4 py-2 whitespace-nowrap">
@@ -195,7 +230,7 @@
                         <td class="px-4 py-2 whitespace-nowrap">
                             <select name="account_id" 
                                     form="form-{{ t.id }}"
-                                    class="w-auto min-w-[150px] max-w-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm p-1">
+                                    class="w-auto min-w-[200px] max-w-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm p-1">
                                 {% for acc in accounts %}
                                     <option value="{{ acc.id }}" {% if acc.id == t.account_id %}selected{% endif %}>
                                         {{ acc.name }} ({{ acc.account_type.replace('_', ' ').title() }})
@@ -208,6 +243,10 @@
                             <form id="form-{{ t.id }}" action="{{ url_for('update_transaction', t_id=t.id) }}" method="POST">
                                 <input type="hidden" name="month_offset" value="{{ month_offset }}">
                                 <input type="hidden" name="search_query" value="{{ search_query }}">
+                                <input type="hidden" name="year" value="{{ selected_year }}">
+                                <input type="hidden" name="month" value="{{ selected_month }}">
+                                <input type="hidden" name="sort_by" value="{{ sort_by }}">
+                                <input type="hidden" name="sort_order" value="{{ sort_order }}">
                             </form>
                 
                             <div class="flex flex-col items-end justify-center h-full">
@@ -226,61 +265,11 @@
             {% else %}
             <div class="text-center py-20 text-gray-500 dark:text-gray-400">
                 <i class="fa-solid fa-folder-open fa-2x mb-3"></i>
-                <p>No transactions found for this period.</p>
+                <p>No transactions found for these filters.</p>
             </div>
             {% endif %}
         </div>
     </div>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const monthOffset = parseInt("{{ month_offset }}");
-            const today = new Date();
-            
-            // Calculate the View Date based on offset
-            // If offset is 0, it's today. If -1, last month.
-            const viewDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
-            
-            const currentMonth = viewDate.getMonth() + 1; // 1-12
-            const currentYear = viewDate.getFullYear();
-
-            // Set Month Dropdown
-            document.getElementById('nav_month').value = currentMonth;
-
-            // Populate Year Dropdown (+/- 5 years)
-            const yearSelect = document.getElementById('nav_year');
-            for (let y = currentYear - 5; y <= currentYear + 5; y++) {
-                const option = document.createElement('option');
-                option.value = y;
-                option.text = y;
-                if (y === currentYear) option.selected = true;
-                
-                // FIX: Explicitly add dark mode classes to JS-generated options
-                option.className = "bg-white dark:bg-gray-800 text-gray-900 dark:text-white";
-                
-                yearSelect.appendChild(option);
-            }
-        });
-
-        function jumpToDate() {
-            const selectedMonth = parseInt(document.getElementById('nav_month').value);
-            const selectedYear = parseInt(document.getElementById('nav_year').value);
-            
-            const today = new Date();
-            const currentYear = today.getFullYear();
-            const currentMonth = today.getMonth() + 1; // 1-12
-
-            // Formula: (TargetYear - CurrentYear) * 12 + (TargetMonth - CurrentMonth)
-            const newOffset = ((selectedYear - currentYear) * 12) + (selectedMonth - currentMonth);
-
-            // Redirect
-            const search = "{{ search_query }}";
-            let url = `/edit_transactions/${newOffset}`;
-            if(search) url += `?search=${encodeURIComponent(search)}`;
-            
-            window.location.href = url;
-        }
-    </script>
 
 </body>
 </html>
