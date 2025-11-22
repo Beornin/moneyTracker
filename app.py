@@ -423,7 +423,7 @@ class DashboardService:
             groc.append(float(abs(sum(t.amount for t in m_txs if t.category.name == 'Groceries'))))
             dine.append(float(abs(sum(t.amount for t in m_txs if t.category.name == 'Eat Out'))))
         fig = go.Figure([go.Bar(name='Groceries', x=month_strs, y=groc, marker_color='#10b981'), go.Bar(name='Eat Out', x=month_strs, y=dine, marker_color='#f59e0b')])
-        fig.update_layout(title='Groceries vs. Eating Out (18 Mo)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
+        fig.update_layout(title='Groceries vs. Eating Out (18 Mo)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_expense_broad(self, months, month_strs, txs, shapes, anns):
