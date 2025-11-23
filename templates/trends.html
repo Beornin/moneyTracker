@@ -20,37 +20,13 @@
         }
     </script>
     <style>
-        /* Custom scrollbar for category list */
-        .category-list::-webkit-scrollbar {
-            width: 6px;
-        }
-        .category-list::-webkit-scrollbar-track {
-            background: #f1f5f9; /* gray-100 */
-        }
-        .dark .category-list::-webkit-scrollbar-track {
-            background: #1f2937; /* gray-800 */
-        }
-        .category-list::-webkit-scrollbar-thumb {
-            background: #94a3b8; /* gray-400 */
-            border-radius: 3px;
-        }
-        .dark .category-list::-webkit-scrollbar-thumb {
-            background: #4b5563; /* gray-600 */
-        }
-
-        /* Loading Spinner */
-        #loading-spinner {
-            border: 5px solid #f3f3f3; /* Light grey */
-            border-top: 5px solid #3b82f6; /* Blue */
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+        .category-list::-webkit-scrollbar { width: 6px; }
+        .category-list::-webkit-scrollbar-track { background: #f1f5f9; }
+        .dark .category-list::-webkit-scrollbar-track { background: #1f2937; }
+        .category-list::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+        .dark .category-list::-webkit-scrollbar-thumb { background: #4b5563; }
+        #loading-spinner { border: 5px solid #f3f3f3; border-top: 5px solid #3b82f6; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 font-sans leading-normal tracking-normal min-h-screen transition-colors duration-200">
@@ -61,7 +37,7 @@
             <h1 class="text-2xl font-extrabold text-gray-900 dark:text-white mb-2">
                 <i class="fa-solid fa-chart-line mr-2 text-purple-600 dark:text-purple-400"></i>Trend Analysis
             </h1>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Select categories and options to plot.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Select categories, accounts, and options to plot.</p>
             
             <a href="{{ url_for('index') }}" class="inline-block text-sm font-medium mb-6 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
                 <i class="fa-solid fa-arrow-left mr-2"></i>Back to Dashboard
@@ -123,16 +99,40 @@
 
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <i class="fa-solid fa-landmark w-4 mr-1"></i>Accounts
+                    </label>
+                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-32 overflow-y-auto category-list space-y-2">
+                        {% if accounts %}
+                            {% for acc in accounts %}
+                            <label class="flex items-center cursor-pointer item-label">
+                                <input type="checkbox" name="account_ids" value="{{ acc.id }}" checked 
+                                       class="h-4 w-4 text-indigo-600 border-gray-300 dark:border-gray-600 rounded">
+                                <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                                    {{ acc.name }} <span class="text-xs text-gray-500">({{ acc.account_type.replace('_',' ').title() }})</span>
+                                </span>
+                            </label>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-xs text-gray-500">No accounts found.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fa-solid fa-tags w-4 mr-1"></i>Categories
                     </label>
-                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-96 overflow-y-auto category-list space-y-3">
+                    <input type="text" id="cat-search" placeholder="Filter categories..." 
+                           class="w-full mb-2 px-3 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                    
+                    <div id="category-list" class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-64 overflow-y-auto category-list space-y-3">
                         {% for group_name, categories in grouped_categories.items() %}
                             {% if group_name.lower() != 'transfers' %}
                             <div>
-                                <h4 class="font-semibold text-gray-800 dark:text-gray-200 text-sm mb-1">{{ group_name }}</h4>
+                                <h4 class="font-semibold text-gray-800 dark:text-gray-200 text-sm mb-1 group-header">{{ group_name }}</h4>
                                 <div class="space-y-1 pl-2">
                                     {% for cat in categories %}
-                                    <label class="flex items-center cursor-pointer">
+                                    <label class="flex items-center cursor-pointer item-label">
                                         <input type="checkbox" name="category_ids" value="{{ cat.id }}" class="h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded">
                                         <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">{{ cat.name }}</span>
                                     </label>
@@ -148,10 +148,13 @@
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fa-solid fa-user-tag w-4 mr-1"></i>Payees
                     </label>
-                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-64 overflow-y-auto category-list space-y-2">
+                    <input type="text" id="payee-search" placeholder="Filter payees..." 
+                           class="w-full mb-2 px-3 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm shadow-sm focus:ring-blue-500 focus:border-blue-500">
+
+                    <div id="payee-list" class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-48 overflow-y-auto category-list space-y-2">
                         {% if payee_labels %}
                             {% for label in payee_labels %}
-                            <label class="flex items-center cursor-pointer">
+                            <label class="flex items-center cursor-pointer item-label">
                                 <input type="checkbox" name="payee_names" value="{{ label }}" class="h-4 w-4 text-green-600 border-gray-300 dark:border-gray-600 rounded">
                                 <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">
                                     {{ label }}
@@ -170,7 +173,7 @@
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fa-solid fa-calendar-check w-4 mr-1"></i>Events (Overlay)
                     </label>
-                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-48 overflow-y-auto category-list space-y-2">
+                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-32 overflow-y-auto category-list space-y-2">
                         {% if all_events %}
                             {% for event in all_events %}
                             <label class="flex items-center cursor-pointer">
@@ -219,7 +222,43 @@
             const startDateInput = document.getElementById('start-date');
             const allDatesButton = document.getElementById('set-all-dates'); 
 
-            // Set default dates (past 1 year)
+            function setupFilter(inputId, listId) {
+                const searchInput = document.getElementById(inputId);
+                if(!searchInput) return;
+
+                searchInput.addEventListener('input', function(e) {
+                    const filterTerm = e.target.value.toLowerCase();
+                    const container = document.getElementById(listId);
+                    const labels = container.querySelectorAll('label.item-label');
+                    
+                    labels.forEach(label => {
+                        const text = label.textContent.toLowerCase();
+                        if (text.includes(filterTerm)) {
+                            label.style.display = 'flex';
+                        } else {
+                            label.style.display = 'none';
+                        }
+                    });
+
+                    if(listId === 'category-list') {
+                        const groupDivs = container.children; 
+                        for(let group of groupDivs) {
+                             if(group.tagName === 'DIV') {
+                                 const groupLabels = group.querySelectorAll('label.item-label');
+                                 let visibleCount = 0;
+                                 groupLabels.forEach(l => {
+                                     if(l.style.display !== 'none') visibleCount++;
+                                 });
+                                 group.style.display = visibleCount > 0 ? 'block' : 'none';
+                             }
+                        }
+                    }
+                });
+            }
+
+            setupFilter('cat-search', 'category-list');
+            setupFilter('payee-search', 'payee-list');
+
             const today = new Date();
             const oneYearAgo = new Date();
             oneYearAgo.setFullYear(today.getFullYear() - 1);
@@ -227,7 +266,6 @@
             endDateInput.value = today.toISOString().split('T')[0];
             startDateInput.value = oneYearAgo.toISOString().split('T')[0];
 
-            // "All Data" button
             allDatesButton.addEventListener('click', async function() {
                 const originalText = allDatesButton.innerHTML;
                 allDatesButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Fetching...';
@@ -254,12 +292,12 @@
                 }
             });
 
-            // Handle form submission
             form.addEventListener('submit', async function(e) {
                 e.preventDefault();
                 
                 const formData = new FormData(form);
                 const categoryIds = formData.getAll('category_ids');
+                const accountIds = formData.getAll('account_ids'); // Capture account IDs
                 const eventIds = formData.getAll('event_ids');
                 const payeeNames = formData.getAll('payee_names'); 
                 const timeBucket = formData.get('time_bucket');
@@ -288,6 +326,7 @@
                         },
                         body: JSON.stringify({
                             category_ids: categoryIds,
+                            account_ids: accountIds, // Send to API
                             payee_names: payeeNames, 
                             event_ids: eventIds,
                             start_date: startDate,

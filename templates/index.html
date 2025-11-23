@@ -141,7 +141,7 @@
                 </a>
                 <a href="{{ url_for('edit_transactions', month_offset=month_offset) }}" 
                    class="flex items-center px-4 py-2 border border-indigo-500 text-indigo-700 dark:text-indigo-400 font-semibold rounded-md bg-indigo-50 dark:bg-indigo-900 hover:bg-indigo-100 dark:hover:bg-indigo-800 transition duration-150">
-                    <i class="fa-solid fa-pen-to-square mr-2"></i>Edit
+                    <i class="fa-solid fa-pen-to-square mr-2"></i>Transactions
                 </a>
                 <a href="{{ url_for('manage_payees') }}" 
                    class="flex items-center px-4 py-2 border border-cyan-500 text-cyan-700 dark:text-cyan-400 font-semibold rounded-md bg-cyan-50 dark:bg-cyan-900 hover:bg-cyan-100 dark:hover:bg-cyan-800 transition duration-150">
@@ -212,6 +212,7 @@
                             <option value="checking">Checking</option>
                             <option value="savings">Savings</option>
                             <option value="credit_card">Credit Card</option>
+                            <option value="hsa">HSA</option>
                         </select>
                     </div>
                     <button type="submit" class="w-full justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 flex items-center justify-center">
@@ -277,17 +278,13 @@
 
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
-                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Total liquidity movement.<br>
-                        <strong>Question Answered:</strong> "How much actual cash moved in or out of my accounts?"<br>
-                        <strong>The Math:</strong><br>
-                        <span class="text-green-400">Inflow:</span> Income + Refunds + Money transferred IN from Investments/Savings.<br>
-                        <span class="text-red-400">Outflow:</span> Expenses + Money transferred OUT to Investments/Savings.<br>
-                        <strong>Filtered Out:</strong> Debt payments (like Credit Card bills) are hidden to avoid double-counting.
+                        <strong>Question Answered:</strong> "Am I cooking enough vs ordering out?"<br>
+                        <strong>The Math:</strong> Direct comparison of the 'Groceries' category vs 'Eat Out'.
                     </span>
                 </div>
-                <div id="chart-cash-flow" class="w-full h-full"></div>
+                <div id="chart-groceries" class="w-full h-full"></div>
             </div>
         </div>
 
@@ -324,6 +321,35 @@
             </div>
         </div>
 
+        <div class="w-full mb-8">
+             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>What is this?</strong> Breakdown of Core Expenses by Category.<br>
+                        <strong>Question Answered:</strong> "Which categories are driving my core spending?"<br>
+                        <strong>The Math:</strong> Sum of expenses per category, filtered by Core Logic.<br>
+                        <strong>Filtered Out:</strong> Same as above (No Car, VUL, excluded payees).
+                    </span>
+                </div>
+                <div id="chart-core-breakdown" class="w-full h-full"></div>
+            </div>
+        </div>
+
+        <div class="w-full mb-8">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question Answered:</strong> "Is my core lifestyle inflation kept in check?"<br>
+                        <strong>The Math:</strong> Cumulative running total of Core Expenses for This Year vs Last Year.<br>
+                        <strong>Goal:</strong> Keep the Solid Line (This Year) below the Dashed Line (Last Year).
+                    </span>
+                </div>
+                <div id="chart-yoy-comparison" class="w-full h-full"></div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
 
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-indigo-200 dark:border-indigo-900 h-[700px] relative">
@@ -351,45 +377,17 @@
             </div>
         </div>
         
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
-                <div class="absolute top-4 left-4 z-10 tooltip-container">
-                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
-                    <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "Is my lifestyle inflation kept in check?"<br>
-                        <strong>The Math:</strong> Cumulative running total of Expenses for This Year vs Last Year.<br>
-                        <strong>Goal:</strong> Keep the Solid Line (This Year) below the Dashed Line (Last Year).
-                    </span>
-                </div>
-                <div id="chart-yoy-comparison" class="w-full h-full"></div>
-            </div>
-            
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
-                <div class="absolute top-4 left-4 z-10 tooltip-container">
-                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
-                    <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "Am I cooking enough vs ordering out?"<br>
-                        <strong>The Math:</strong> Direct comparison of the 'Groceries' category vs 'Eat Out'.
-                    </span>
-                </div>
-                <div id="chart-groceries" class="w-full h-full"></div>
-            </div>
-
-        </div>
 
         <div class="w-full mb-8">
-             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-green-200 dark:border-green-900 h-[600px] relative">
+             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-300 dark:border-teal-800 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
-                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-green-500 cursor-pointer text-lg"></i>
+                    <i class="fa-solid fa-heart-pulse text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "Am I actually saving money?"<br>
-                        <strong>Green Bar:</strong> Money transferred INTO accounts marked as 'Savings'.<br>
-                        <strong>Red Bar:</strong> Money withdrawn FROM 'Savings' accounts.<br>
-                        <strong>Filters:</strong> Only looks at transactions within Savings-type accounts.
+                        <strong>What is this?</strong> Dedicated HSA Expenses.<br>
+                        <strong>Note:</strong> These expenses are EXCLUDED from all other charts above to keep your operating budget clean.
                     </span>
                 </div>
-                <div id="chart-savings" class="w-full h-full"></div>
+                <div id="chart-hsa-activity" class="w-full h-full"></div>
             </div>
         </div>
 
@@ -419,24 +417,24 @@
             function renderAllCharts() {
                 // Note: We use the new keys from app.py here
                 const plot1 = {{ chart_income_vs_expense|safe if chart_income_vs_expense else 'null' }};
-                const plot2 = {{ chart_savings|safe if chart_savings else 'null' }};
-                const plot3 = {{ chart_cash_flow|safe if chart_cash_flow else 'null' }};
                 const plot4 = {{ chart_core_operating|safe if chart_core_operating else 'null' }};
                 const plot5 = {{ chart_groceries|safe if chart_groceries else 'null' }};
                 const plot6 = {{ chart_expense_broad|safe if chart_expense_broad else 'null' }};
                 const plot7 = {{ chart_top_payees|safe if chart_top_payees else 'null' }};
                 const plot8 = {{ chart_yoy|safe if chart_yoy else 'null' }};
-                const plot9 = {{ chart_core_summary|safe if chart_core_summary else 'null' }}; // NEW CHART
+                const plot9 = {{ chart_core_summary|safe if chart_core_summary else 'null' }}; 
+                const plot10 = {{ chart_core_breakdown|safe if chart_core_breakdown else 'null' }};
+                const plot11 = {{ chart_hsa_activity|safe if chart_hsa_activity else 'null' }}; // NEW CHART
 
                 renderChart(plot1, 'chart-income-expense');
-                renderChart(plot3, 'chart-cash-flow');
                 renderChart(plot4, 'chart-core-operating');
-                renderChart(plot9, 'chart-core-summary'); // Render New Chart in Grid 2
+                renderChart(plot9, 'chart-core-summary'); 
+                renderChart(plot10, 'chart-core-breakdown'); 
                 renderChart(plot6, 'chart-expense-broad');
                 renderChart(plot7, 'chart-top-expenses');
                 renderChart(plot8, 'chart-yoy-comparison');
                 renderChart(plot5, 'chart-groceries');
-                renderChart(plot2, 'chart-savings'); // Render Savings at bottom
+                renderChart(plot11, 'chart-hsa-activity');
             }
 
             var themeToggleBtn = document.getElementById('theme-toggle');

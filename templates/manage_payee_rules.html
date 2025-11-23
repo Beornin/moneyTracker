@@ -75,7 +75,7 @@
                 
                 <div class="md:col-span-1">
                     <label for="fragment" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Match Fragment (ALL CAPS)</label>
-                    <input type="text" name="fragment" id="fragment" required 
+                    <input type="text" name="fragment" id="fragment" required  autocomplete="off" 
                            placeholder="e.g., PUBLIX"
                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 font-mono">
                 </div>
@@ -92,7 +92,7 @@
 
                 <div class="md:col-span-1">
                     <label for="display_name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Payee Label</label>
-                    <input type="text" name="display_name" id="display_name" required 
+                    <input type="text" name="display_name" id="display_name" required  autocomplete="off" 
                            placeholder="e.g., Publix"
                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
                 </div>
@@ -128,7 +128,7 @@
         
         <div class="mb-4">
              <form action="{{ url_for('manage_rules') }}" method="GET" class="flex gap-2">
-                 <input type="text" name="search" value="{{ search_query }}" placeholder="Search rules..." 
+                 <input type="text" name="search" value="{{ search_query }}"  autocomplete="off" placeholder="Search rules..." 
                         class="flex-grow rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm p-2 text-sm">
                  <button type="submit" class="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-white rounded-md hover:bg-gray-300 dark:hover:bg-gray-500">Search</button>
                  {% if search_query %}
@@ -152,7 +152,7 @@
                     {% for rule in rules %}
                     <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <input type="text" name="fragment" value="{{ rule.fragment }}" required form="rule-form-{{ rule.id }}"
+                            <input type="text" name="fragment" value="{{ rule.fragment }}"  autocomplete="off"  required form="rule-form-{{ rule.id }}"
                                    class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 font-mono">
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
@@ -164,7 +164,7 @@
                             </select>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <input type="text" name="display_name" value="{{ rule.display_name }}" required form="rule-form-{{ rule.id }}"
+                            <input type="text" name="display_name" value="{{ rule.display_name }}"  autocomplete="off"  required form="rule-form-{{ rule.id }}"
                                    class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">

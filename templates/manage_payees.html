@@ -60,7 +60,7 @@
                 </h3>
                 <form action="{{ url_for('add_payee') }}" method="POST" class="flex gap-2">
                     <input type="text" name="new_payee_name" required placeholder="e.g. Cash Withdrawal"
-                           class="flex-grow rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm p-2 text-sm focus:ring-green-500 focus:border-green-500">
+                            autocomplete="off" class="flex-grow rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm p-2 text-sm focus:ring-green-500 focus:border-green-500">
                     <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-bold shadow-sm transition-colors">
                         Add
                     </button>
@@ -72,7 +72,7 @@
                     <i class="fa-solid fa-search mr-2 text-blue-500"></i>Find Existing Payee
                 </h3>
                 <form action="{{ url_for('manage_payees') }}" method="GET" class="flex gap-2">
-                    <input type="text" name="search" value="{{ search_query }}" placeholder="Search by Name..." 
+                    <input type="text" name="search" value="{{ search_query }}" autocomplete="off" placeholder="Search by Name..." 
                            class="flex-grow rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm p-2 text-sm focus:ring-blue-500 focus:border-blue-500">
                     <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-bold shadow-sm transition-colors">
                         Search

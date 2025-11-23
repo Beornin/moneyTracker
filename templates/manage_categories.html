@@ -68,7 +68,7 @@
                 
                 <div class="md:col-span-1">
                     <label for="name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Category Name</label>
-                    <input type="text" name="name" id="name" required 
+                    <input type="text" name="name" id="name"  autocomplete="off" required 
                            placeholder="e.g. Groceries, Dining Out"
                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
                 </div>
@@ -118,7 +118,7 @@
                         <td class="px-6 py-4 font-medium text-gray-900 dark:text-white">
                             <form action="{{ url_for('rename_category') }}" method="POST" class="flex gap-2 items-center">
                                 <input type="hidden" name="category_id" value="{{ cat.id }}">
-                                <input type="text" name="category_name" value="{{ cat.name }}" 
+                                <input type="text" name="category_name"  autocomplete="off" value="{{ cat.name }}" 
                                        class="bg-transparent border-none focus:ring-0 p-0 font-medium text-gray-900 dark:text-white w-full">
                                 {% if cat.name != 'Uncategorized' %}
                                 <button type="submit" class="text-gray-400 hover:text-blue-500 text-xs"><i class="fa-solid fa-pen"></i></button>
