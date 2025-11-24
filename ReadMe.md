@@ -1,68 +1,52 @@
 # Personal Finance & Expense Tracker
 
-A Python Flask-based web application designed to track personal expenses, categorize spending, and visualize trends using automated rules and an intuitive dashboard.
+A robust Flask-based personal finance dashboard designed for granular control over expenses, income, and savings. It features automated PDF statement parsing (Chase & HealthEquity HSA), customizable categorization rules, detailed trend analysis, and AI-powered insights.
 
 ## 🚀 Features
 
-### 1. Dashboard
-* **Income vs Expenses (Budget View):** Tracks your "earnings" (salary, dividends) vs. "spending" (purchases minus refunds). Transfers between your own accounts are ignored to show true profit/loss.
-* **Total Cash Flow (Liquidity View):** Tracks ALL money movement. Borrowing a loan counts as inflow; paying a credit card bill counts as outflow. Perfect for answering "Do I have cash available?".
-* **Core Operating Performance:** A focused view of your discretionary spending (Groceries, Dining, Shopping) by filtering out large fixed costs like Rent/Mortgage, Car Payments, and Insurance.
-* **Savings Growth:** Visualizes net transfers into savings accounts.
-* **Top Payees:** A ranking of where you spend the most money (grouped by payee name).
-* **Year-over-Year (YoY) Comparison:** Compares your cumulative net spending this year vs. last year to track lifestyle inflation.
+### 1. Dashboards & Analysis
+* **Main Dashboard**: 
+    * **Income vs. Expense**: Monthly P&L excluding transfers and hidden categories.
+    * **Core Operating**: Tracks "Day-to-Day" lifestyle costs, filtering out large fixed costs (like Mortgages/Car Payments) to show true discretionary spending.
+    * **Savings Rate**: Visualizes money moving into vs. out of Savings accounts.
+    * **HSA Activity**: A dedicated section for Health Savings Account expenses (medical only), separated from the main operating budget.
+* **Trend Analysis**: Interactive line/bar/area charts to visualize spending over time by Category, Payee, or Account.
+* **Monthly Averages**: A powerful calculator to determine the average monthly spend for specific categories or payees over a selected date range.
+    * **Drill-down**: View sub-rows for individual payees within a category total.
+    * **Smart Filtering**: Excludes a payee from the category total if that payee is also selected individually (prevents double counting).
+    * **Budget Saving**: Save your specific filter sets (e.g., "Groceries + Dining + Gas") as named Budgets to reload later.
 
-### 2. Transaction Management
-* **File Upload:** Supports CSV and PDF uploads.
-* **Contra-Expense Logic:** Refunds are treated as negative expenses, not income.
-    * *Example:* Spending \$100 and getting a \$20 refund results in an \$80 expense for that category.
-* **Duplicate Handling:**
-    * **Blind Trust:** The system does NOT check for duplicates. It assumes the user uploads the correct files. If you upload the same file twice, the transactions will be duplicated.
-* **CSV Format:**
-    * Files must follow a strict 5-column layout (header names are ignored, only position matters):
-    * `Column 0` = Date
-    * `Column 1` = Amount
-    * `Column 2` = (Ignored)
-    * `Column 3` = (Ignored)
-    * `Column 4` = Description
+### 2. Data Management
+* **Smart Import**:
+    * **Chase PDFs**: Automatically parses transactions and statement dates.
+    * **HSA PDFs**: Parses HealthEquity statements, strictly filtering for *expenses* (withdrawals) and ignoring contributions.
+    * **Duplicate Prevention**: Tracks uploaded statement periods in the database to prevent re-importing the same file.
+* **Categorization Engine**:
+    * **Payee Rules**: Create "Contains" rules (e.g., "PUBLIX" -> "Groceries") to automatically categorize transactions.
+    * **Review Queue**: Transactions without a match land in a queue for manual review.
+    * **Bulk Updates**: Creating a rule applies it historically to all matching past transactions.
 
-### 3. Categorization Engine
-* **Payee Rules:** Create rules to automatically categorize transactions based on text matches (e.g., "PUBLIX" -> "Groceries").
-* **Review Queue:** Any transaction without a rule lands in the "Review Transactions" inbox for manual categorization.
-* **Bulk Updates:** Creating a rule applies it historically to all matching past transactions.
-
-### 4. AI Insights (Toggleable)
-* Integrated with Google Gemini API.
-* Provides text-based analysis of your monthly and yearly spending trends.
-* **On-Demand:** Insights are hidden by default and only generate when you toggle the switch on the dashboard.
+### 3. AI Insights
+* Integrated with **Google Gemini API**.
+* Provides on-demand text-based analysis of your monthly and yearly spending trends.
+* **Privacy**: Insights are generated only when you click the toggle; data is sent ephemerally to the API.
 
 ## 🛠️ Technical Stack
-* **Backend:** Python, Flask, SQLAlchemy (SQLite/PostgreSQL)
-* **Frontend:** HTML, Tailwind CSS, Plotly.js (Charts)
-* **Data Processing:** Pandas, PDFPlumber
+* **Backend**: Python, Flask, SQLAlchemy (PostgreSQL)
+* **Frontend**: HTML5, Tailwind CSS, Plotly.js
+* **Data Processing**: Pandas, PDFPlumber
 
 ## 📦 Setup & Installation
 
-1.  **Install Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+### Prerequisites
+* Python 3.10+
+* PostgreSQL Database
+* Create a .env file in the root directory. You must include the Gemini API key for insights to work!
 
-2.  **Environment Variables:**
-    Create a `.env` file with the following:
-    ```ini
-    DATABASE_URL=postgresql://user:pass@localhost:5432/budget_db
-    GEMINI_API_KEY=your_api_key_here
-    ```
-
-3.  **Run the App:**
-    ```bash
-    python app.py
-    ```
-
-4.  **Access:**
-    Open your browser to `http://localhost:5000`
-
-## 💡 Usage Tips
-* **Uploads:** Since duplicate detection is disabled, be careful not to re-upload the same bank statement twice.
-* **Refunds:** Always categorize a refund to the same category as the original purchase (e.g., a refund from Home Depot should be categorized as "Home Improvement", not "Income").
+### 1. Installation
+```bash
+git clone <repository-url>
+cd finance-app
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt

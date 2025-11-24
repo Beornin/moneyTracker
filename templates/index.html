@@ -131,6 +131,10 @@
                    class="flex items-center px-4 py-2 border border-purple-500 text-purple-700 dark:text-purple-400 font-semibold rounded-md bg-purple-50 dark:bg-purple-900 hover:bg-purple-100 dark:hover:bg-purple-800 transition duration-150">
                     <i class="fa-solid fa-chart-line mr-2"></i>Trends
                 </a>
+                <a href="{{ url_for('monthly_averages') }}" 
+                   class="flex items-center px-4 py-2 border border-green-500 text-green-700 dark:text-green-400 font-semibold rounded-md bg-green-50 dark:bg-green-900 hover:bg-green-100 dark:hover:bg-green-800 transition duration-150">
+                    <i class="fa-solid fa-calculator mr-2"></i>Budget
+                </a>
                 <a href="{{ url_for('categorize') }}" 
                    class="flex items-center px-4 py-2 border border-yellow-500 text-yellow-700 dark:text-yellow-400 font-semibold rounded-md bg-yellow-50 dark:bg-yellow-900 hover:bg-yellow-100 dark:hover:bg-yellow-800 transition duration-150">
                     <i class="fa-solid fa-tags mr-2"></i>Review ({{ summary.uncategorized_count }})

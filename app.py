@@ -2,6 +2,7 @@ import os
 import calendar
 import re
 import io
+import json
 from datetime import datetime, date, timedelta 
 import pdfplumber 
 import pandas as pd
@@ -30,10 +31,9 @@ EXCLUDED_PAYEE_LABELS_CORE = ['Planting Oaks', 'Jaxco Furniture','Planting Oaks'
 
 CHASE_DATE_REGEX = re.compile(r"Opening/Closing Date\s*([\d/]+)\s*-\s*([\d/]+)")
 CHASE_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*)")
-# Regex for HSA: Date (MM/DD/YYYY) + Description + Amount (76.92 or (200.00)) + Balance
-HSA_LINE_REGEX = re.compile(r"^(\d{2}/\d{2}/\d{4})\s+(.*?)\s+([\(]?[\d,]+\.\d{2}[\)]?)\s+[\d,]+\.\d{2}")
+HSA_PERIOD_REGEX = re.compile(r"Period\s*:?\s*(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4})\s*through\s*(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4})", re.IGNORECASE)
 AMOUNT_REGEX = re.compile(r"([\d,]+\.\d{2})(?=\s*$)")
-
+HSA_LINE_REGEX = re.compile(r"^(\d{2}/\d{2}/\d{4})\s+(.*?)\s+([\(]?[\d,]+\.\d{2}[\)]?)\s+[\d,]+\.\d{2}")
 # --- MIXINS ---
 
 class TimestampMixin(object):
@@ -46,25 +46,27 @@ class Account(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False)
     account_type = db.Column(db.String(50), nullable=False) 
-    starting_balance = db.Column(db.Numeric(10, 2), default=0.0, nullable=False)
     transactions = db.relationship('Transaction', backref='account', lazy=True, cascade="all, delete-orphan")
     __table_args__ = (db.UniqueConstraint('name', 'account_type', name='_account_uc'),)
-
-    @property
-    def current_balance(self):
-        # Calculate balance: Starting Balance + Sum of all transactions
-        if hasattr(self, 'starting_balance'):
-             total_tx = db.session.query(func.sum(Transaction.amount)).filter(Transaction.account_id == self.id).scalar() or 0
-             return float(self.starting_balance) + float(total_tx)
-        return 0.0
+    
+class StatementRecord(db.Model, TimestampMixin):
+    """Tracks uploaded PDF statement periods to prevent duplicates."""
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('account.id'), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    
+    __table_args__ = (
+        db.UniqueConstraint('account_id', 'start_date', 'end_date', name='_statement_period_uc'),
+    )
 
 class Category(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), nullable=False, unique=True)
+    name = db.Column(db.String(80), nullable=False, unique=True) # Unique creates an implicit index
     type = db.Column(db.String(20), nullable=False)
     transactions = db.relationship('Transaction', backref='category', lazy=True)
     payee_rules = db.relationship('PayeeRule', backref='category', lazy=True)
-    __table_args__ = (db.Index('idx_category_name', 'name'),)
+    # Removed redundant idx_category_name since name is unique
 
 class PayeeRule(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
@@ -81,10 +83,10 @@ class PayeeRule(db.Model, TimestampMixin):
 
 class Payee(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(500), nullable=False, unique=True)
+    name = db.Column(db.String(500), nullable=False, unique=True) # Unique creates an implicit index
     rule_id = db.Column(db.Integer, db.ForeignKey('payee_rule.id'), nullable=True)
     transactions = db.relationship('Transaction', backref='payee', lazy=True)
-    __table_args__ = (db.Index('idx_payee_name', 'name'),)
+    # Removed redundant idx_payee_name since name is unique
 
 class Transaction(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
@@ -97,9 +99,12 @@ class Transaction(db.Model, TimestampMixin):
     is_deleted = db.Column(db.Boolean, default=False, nullable=False)
     
     __table_args__ = (
+        # Composite index for date filtering which usually also filters by is_deleted
         db.Index('idx_tx_date_deleted', 'date', 'is_deleted'),
+        # Index Foreign Keys for faster joins
         db.Index('idx_tx_category', 'category_id'),
         db.Index('idx_tx_account', 'account_id'),
+        db.Index('idx_tx_payee', 'payee_id'), # Added missing index for Payee Joins
     )
 
 class Event(db.Model, TimestampMixin):
@@ -108,18 +113,17 @@ class Event(db.Model, TimestampMixin):
     description = db.Column(db.String(500), nullable=False)
     __table_args__ = (db.UniqueConstraint('date', 'description', name='_event_uc'),)
 
+class Budget(db.Model, TimestampMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    start_date = db.Column(db.Date, nullable=True)
+    end_date = db.Column(db.Date, nullable=True)
+    criteria = db.Column(db.Text, nullable=False)
+
 # --- INITIALIZATION ---
 
 def create_tables():
     db.create_all()
-    try:
-        with db.engine.connect() as conn:
-            conn.execute(text("ALTER TABLE transaction DROP CONSTRAINT IF EXISTS _unique_tx_uc"))
-            # Ensure starting_balance exists
-            conn.execute(text("ALTER TABLE account ADD COLUMN IF NOT EXISTS starting_balance NUMERIC(10, 2) DEFAULT 0.0 NOT NULL"))
-            conn.commit()
-    except Exception as e:
-        print(f"Constraint cleanup skipped: {e}")
 
     if Category.query.count() == 0:
         uncat = Category(name='Uncategorized', type='Expense')
@@ -138,6 +142,25 @@ def create_tables():
 
 def get_uncategorized_id():
     return Category.query.filter_by(name='Uncategorized').first().id
+
+def try_parse_date(date_str):
+    if not date_str: return None
+    date_str = date_str.strip()
+    
+    # Try Standard ISO format first (HTML5 Date Input)
+    try:
+        return datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        pass
+
+    # Normalize separators for other formats
+    clean_date_str = date_str.replace('.', '/').replace('-', '/')
+    for fmt in ('%m/%d/%y', '%m/%d/%Y'):
+        try:
+            return datetime.strptime(clean_date_str, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 def apply_rules_to_payee(payee, uncat_id, amount):
     if payee.rule_id: 
@@ -177,15 +200,25 @@ def run_rule_on_all_payees(rule, overwrite=False):
     return count
 
 def parse_chase_pdf(file_stream):
+    """
+    Returns a tuple: (transactions_list, period_start_date, period_end_date)
+    or (None, None, None) on failure.
+    """
     transactions = []
+    period_start = None
+    period_end = None
     try:
         with pdfplumber.open(file_stream) as pdf:
+            # 1. Extract Date Range
             page1_text = pdf.pages[0].extract_text()
             date_match = CHASE_DATE_REGEX.search(page1_text)
-            if not date_match: return None
-            end_date = datetime.strptime(date_match.group(2), '%m/%d/%y').date()
-            end_year, end_month = end_date.year, end_date.month
+            if not date_match: return None, None, None
+            
+            period_start = datetime.strptime(date_match.group(1), '%m/%d/%y').date()
+            period_end = datetime.strptime(date_match.group(2), '%m/%d/%y').date()
+            end_year, end_month = period_end.year, period_end.month
 
+            # 2. Extract Transactions
             full_text = ""
             for p in pdf.pages:
                 txt = p.extract_text()
@@ -211,11 +244,18 @@ def parse_chase_pdf(file_stream):
                             final_amount = val * current_multiplier
                             transactions.append({'Date': dt, 'Description': desc_raw, 'Amount': final_amount})
                         except Exception: continue
-        return transactions
-    except Exception as e: print(f"PDF Parse Error: {e}"); return None
+        return transactions, period_start, period_end
+    except Exception as e: 
+        print(f"PDF Parse Error: {e}")
+        return None, None, None
 
 def parse_hsa_pdf(file_stream):
+    """
+    Returns a tuple: (transactions_list, period_start_date, period_end_date)
+    """
     transactions = []
+    period_start = None
+    period_end = None
     try:
         with pdfplumber.open(file_stream) as pdf:
             full_text = ""
@@ -223,6 +263,15 @@ def parse_hsa_pdf(file_stream):
                 txt = p.extract_text()
                 if txt: full_text += txt + "\n"
             
+            # 1. Extract Period (Flexible Year)
+            # Matches text like: Period: 10/01/25 through 10/31/25
+            
+            period_match = HSA_PERIOD_REGEX.search(full_text)
+            print(period_match)
+            if period_match:
+                period_start = try_parse_date(period_match.group(1))
+                period_end = try_parse_date(period_match.group(2))
+
             lines = full_text.split('\n')
             for line in lines:
                 match = HSA_LINE_REGEX.search(line)
@@ -244,10 +293,10 @@ def parse_hsa_pdf(file_stream):
                         transactions.append({'Date': dt, 'Description': desc.strip(), 'Amount': amount})
                     except ValueError:
                         continue 
+        return transactions, period_start, period_end
     except Exception as e:
         print(f"HSA PDF Parse Error: {e}")
-        return None
-    return transactions
+        return None, None, None
 
 def get_monthly_summary_direct(month_offset):
     today = date.today()
@@ -716,39 +765,49 @@ def upload_file():
     account = db.session.get(Account, account_id)
     if not account: abort(404)
     uncat_id = get_uncategorized_id()
-    added, skipped, duplicates = 0, 0, 0
+    added = 0
     
     for file in files:
         try:
             df = pd.DataFrame()
             if file.filename.lower().endswith('.csv'):
                 stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
-                # CSV Format: Date, Amount, x, x, Description (Indices 0, 1, 4)
                 df = pd.read_csv(stream)
                 if df.shape[1] >= 5:
                     df = df.iloc[:, [0, 1, 4]]
                     df.columns = ['Date', 'Amount', 'Description']
-                else:
-                    flash(f"Skipping {file.filename}: Incorrect columns.", "warning")
-                    continue
+                else: continue
             elif file.filename.lower().endswith('.pdf'):
-                data = None
+                data, p_start, p_end = None, None, None
                 if account.account_type == 'hsa':
-                    data = parse_hsa_pdf(file.stream)
+                    data, p_start, p_end = parse_hsa_pdf(file.stream)
                 else:
-                    data = parse_chase_pdf(file.stream)
+                    data, p_start, p_end = parse_chase_pdf(file.stream)
                 
+                # Duplicate Check logic
+                print("p_start: ",  p_start)
+                print("p_end: ",  p_end)
+                if p_start and p_end:
+                    existing = StatementRecord.query.filter_by(account_id=account.id, start_date=p_start, end_date=p_end).first()
+                    if existing:
+                        flash(f"Skipped {file.filename}: Statement period {p_start} - {p_end} already exists.", "warning")
+                        continue
+                    db.session.add(StatementRecord(account_id=account.id, start_date=p_start, end_date=p_end))
+                    db.session.commit()
+
                 if data: df = pd.DataFrame(data)
+            
             if df.empty: continue
 
             new_transactions = []
-            
             for _, row in df.iterrows():
                 try:
                     dvals = row.get('Date')
                     date_val = pd.to_datetime(dvals).date() if isinstance(dvals, str) else dvals
                     desc = str(row.get('Description', '')).strip()
                     amount = float(str(row.get('Amount')).replace('$','').replace(',',''))
+                    
+                    # Negate positive expenses for Credit Cards (CSV only usually needs this, PDFs handled in parser)
                     if account.account_type == 'credit_card' and file.filename.lower().endswith('.csv') and amount > 0:
                         amount = -amount 
                     
@@ -760,11 +819,9 @@ def upload_file():
                     
                     cat_id = apply_rules_to_payee(payee, uncat_id, amount)
                     
-                    new_transactions.append(
-                        Transaction(date=date_val, original_description=desc, amount=amount, payee_id=payee.id, category_id=cat_id, account_id=account.id)
-                    )
+                    new_transactions.append(Transaction(date=date_val, original_description=desc, amount=amount, payee_id=payee.id, category_id=cat_id, account_id=account.id))
                     added += 1
-                except Exception as e: print(f"Row Error: {e}")
+                except Exception: continue
             
             if new_transactions:
                 db.session.add_all(new_transactions)
@@ -774,7 +831,7 @@ def upload_file():
             db.session.rollback()
             flash(f"File Error {file.filename}: {e}", "danger")
             
-    flash(f"Imported {added} transactions.", "success")
+    if added > 0: flash(f"Imported {added} transactions.", "success")
     return redirect(url_for('index'))
 
 @app.route('/manage_payees')
@@ -1035,6 +1092,137 @@ def edit_transactions(month_offset):
         
     return render_template('edit_transactions.html', transactions=txs, payees=Payee.query.order_by(Payee.name).all(), grouped_categories=grouped, accounts=Account.query.all(), month_offset=month_offset, current_month_name=current_context, search_query=srch, available_years=available_years, month_choices=month_choices, selected_year=request.args.get('year'), selected_month=request.args.get('month'), sort_by=sort_by, sort_order=sort_order)
 
+@app.route('/monthly_averages')
+def monthly_averages():
+    """Renders the monthly averages analysis page."""
+    cats = Category.query.order_by(Category.type, Category.name).all()
+    grouped_categories = {}
+    for c in cats:
+        if c.type not in grouped_categories: grouped_categories[c.type] = []
+        grouped_categories[c.type].append(c)
+    
+    accounts = Account.query.order_by(Account.name).all()
+    
+    results = db.session.query(func.coalesce(PayeeRule.display_name, Payee.name).label('label')).select_from(Payee).outerjoin(PayeeRule).distinct().order_by('label').all()
+    unique_labels = [r.label for r in results if r.label]
+    
+    budgets = Budget.query.order_by(Budget.name).all()
+    
+    return render_template('monthly_averages.html', grouped_categories=grouped_categories, payee_labels=unique_labels, accounts=accounts, budgets=budgets)
+
+@app.route('/api/average_data', methods=['POST'])
+def get_average_data():
+    """
+    Calculates total and monthly average expenses for selected categories/payees/accounts
+    within a date range, including a breakdown of payees for each selected category.
+    Logic Updated: Exclude Payee from Category total if that Payee is explicitly selected.
+    """
+    data = request.get_json()
+    cat_ids = data.get('category_ids', [])
+    payee_names = data.get('payee_names', [])
+    acct_ids = [int(i) for i in data.get('account_ids', [])]
+    
+    try:
+        s_date = datetime.strptime(data.get('start_date'), '%Y-%m-%d').date()
+        e_date = datetime.strptime(data.get('end_date'), '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid date format'}), 400
+
+    num_months = (e_date.year - s_date.year) * 12 + (e_date.month - s_date.month) + 1
+    if num_months < 1: num_months = 1
+
+    results = []
+
+    # 1. Calculate Totals for Selected Categories
+    if cat_ids:
+        # Main Query for Categories
+        q = db.session.query(Category.id, Category.name, func.sum(Transaction.amount).label('total'))\
+            .join(Category)
+            
+        # FILTER LOGIC: Exclude transactions if their Payee is currently selected in 'payee_names'
+        # This prevents double counting in the Category bucket.
+        if payee_names:
+            q = q.join(Payee).outerjoin(PayeeRule)
+            name_col = func.coalesce(PayeeRule.display_name, Payee.name)
+            q = q.filter(name_col.notin_(payee_names))
+
+        q = q.filter(Transaction.date >= s_date, Transaction.date <= e_date, Transaction.is_deleted == False)\
+            .filter(Transaction.category_id.in_(cat_ids))
+        
+        if acct_ids:
+            q = q.filter(Transaction.account_id.in_(acct_ids))
+            
+        q = q.group_by(Category.id, Category.name)
+        
+        for row in q.all():
+            total = abs(float(row.total)) if row.total else 0.0
+            
+            # Sub-query for Payee Breakdown within this Category
+            payee_q = db.session.query(
+                func.coalesce(PayeeRule.display_name, Payee.name).label('payee_name'),
+                func.sum(Transaction.amount).label('ptotal')
+            ).select_from(Transaction).join(Payee).outerjoin(PayeeRule)\
+             .filter(Transaction.category_id == row.id) \
+             .filter(Transaction.date >= s_date, Transaction.date <= e_date, Transaction.is_deleted == False)
+
+            if acct_ids:
+                payee_q = payee_q.filter(Transaction.account_id.in_(acct_ids))
+
+            # ALSO apply the same exclusion filter to the breakdown
+            if payee_names:
+                 name_col_sub = func.coalesce(PayeeRule.display_name, Payee.name)
+                 payee_q = payee_q.filter(name_col_sub.notin_(payee_names))
+
+            payee_q = payee_q.group_by(func.coalesce(PayeeRule.display_name, Payee.name))
+            
+            sub_payees = []
+            for p_row in payee_q.all():
+                p_total = abs(float(p_row.ptotal))
+                sub_payees.append({
+                    'name': p_row.payee_name,
+                    'total': p_total,
+                    'average': p_total / num_months
+                })
+            
+            # Sort sub-payees by total descending
+            sub_payees.sort(key=lambda x: x['total'], reverse=True)
+
+            results.append({
+                'name': row.name,
+                'type': 'Category',
+                'total': total,
+                'average': total / num_months,
+                'breakdown': sub_payees 
+            })
+
+    # 2. Calculate Totals for Selected Payees (Individual selection)
+    if payee_names:
+        name_col = func.coalesce(PayeeRule.display_name, Payee.name)
+        q = db.session.query(name_col.label('name'), func.sum(Transaction.amount).label('total'))\
+            .select_from(Transaction).join(Payee).outerjoin(PayeeRule)\
+            .filter(Transaction.date >= s_date, Transaction.date <= e_date, Transaction.is_deleted == False)\
+            .filter(name_col.in_(payee_names))
+            
+        if acct_ids:
+            q = q.filter(Transaction.account_id.in_(acct_ids))
+            
+        q = q.group_by(name_col)
+        
+        for row in q.all():
+            total = abs(float(row.total)) if row.total else 0.0
+            results.append({
+                'name': row.name,
+                'type': 'Payee',
+                'total': total,
+                'average': total / num_months,
+                'breakdown': [] # No breakdown for individual payees
+            })
+
+    # Sort by Total Spent descending
+    results.sort(key=lambda x: x['total'], reverse=True)
+
+    return jsonify({'results': results, 'num_months': num_months})
+
 @app.route('/update_transaction/<int:t_id>', methods=['POST'])
 def update_transaction(t_id):
     t = db.session.get(Transaction, t_id)
@@ -1049,6 +1237,58 @@ def update_transaction(t_id):
         t.date, t.amount, t.is_deleted = datetime.strptime(request.form.get('date'), '%Y-%m-%d').date(), float(request.form.get('amount')), 'is_deleted' in request.form
         db.session.commit()
     return redirect(url_for('edit_transactions', month_offset=request.form.get('month_offset'), search=request.form.get('search_query')))
+
+@app.route('/api/save_budget', methods=['POST'])
+def save_budget():
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        if not name: return jsonify({'success': False, 'message': 'Budget name required'})
+        
+        # Parse dates for columns
+        s_date = try_parse_date(data.get('start_date'))
+        e_date = try_parse_date(data.get('end_date'))
+
+        # Store selections as JSON string
+        criteria = json.dumps({
+            'category_ids': data.get('category_ids', []),
+            'payee_names': data.get('payee_names', []),
+            'account_ids': data.get('account_ids', [])
+        })
+        
+        budget = Budget.query.filter_by(name=name).first()
+        if budget:
+            budget.criteria = criteria
+            budget.start_date = s_date
+            budget.end_date = e_date
+            msg = 'Budget updated'
+        else:
+            budget = Budget(name=name, criteria=criteria, start_date=s_date, end_date=e_date)
+            db.session.add(budget)
+            msg = 'Budget saved'
+        
+        db.session.commit()
+        return jsonify({'success': True, 'message': msg, 'id': budget.id})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/load_budget/<int:budget_id>')
+def load_budget(budget_id):
+    budget = db.session.get(Budget, budget_id)
+    if not budget: return jsonify({'success': False})
+    
+    # Combine JSON criteria with column dates for frontend
+    criteria = json.loads(budget.criteria)
+    criteria['start_date'] = budget.start_date.strftime('%Y-%m-%d') if budget.start_date else ''
+    criteria['end_date'] = budget.end_date.strftime('%Y-%m-%d') if budget.end_date else ''
+    
+    return jsonify({'success': True, 'name': budget.name, 'criteria': criteria})
+
+@app.route('/api/delete_budget/<int:budget_id>', methods=['POST'])
+def delete_budget(budget_id):
+    Budget.query.filter_by(id=budget_id).delete()
+    db.session.commit()
+    return jsonify({'success': True})
 
 @app.route('/edit_accounts')
 def edit_accounts():
