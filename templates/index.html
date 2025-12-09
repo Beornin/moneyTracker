@@ -301,39 +301,9 @@
             </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-            
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-200 dark:border-blue-900 h-[600px] relative">
-                <div class="absolute top-4 left-4 z-10 tooltip-container">
-                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
-                    <span class="tooltip-text">
-                        <strong>What is this?</strong> Your budget balance sheet.<br>
-                        <strong>Question Answered:</strong> "Did I earn more than I spent this month?"<br>
-                        <strong>The Math:</strong><br>
-                        <span class="text-green-400">Income:</span> Sum of ALL transactions categorized as 'Income'.<br>
-                        <span class="text-red-400">Expense:</span> Sum of ALL transactions categorized as 'Expense'.<br>
-                        <span class="text-yellow-500">Line:</span> Cumulative Savings (Income - Expense) over time.<br>
-                        <strong>Filtered Out:</strong> ALL Transfers (credit card payments, savings moves) to show true P&L.
-                    </span>
-                </div>
-                <div id="chart-income-expense" class="w-full h-full"></div>
-            </div>
-
+        <div class="w-full mb-8">
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
-                <div class="absolute top-4 left-4 z-10 tooltip-container">
-                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
-                    <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "Am I cooking enough vs ordering out?"<br>
-                        <strong>The Math:</strong> Direct comparison of the 'Groceries' category vs 'Eat Out'.
-                    </span>
-                </div>
-                <div id="chart-groceries" class="w-full h-full"></div>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-            
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[600px] relative">
+                
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -348,7 +318,54 @@
                     </span>
                 </div>
                 <div id="chart-core-operating" class="w-full h-full"></div>
+                </div>
+
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[600px] relative">
+          
+                <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-orange-200 dark:border-orange-900 h-[500px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question Answered:</strong> "On which days am I weakest?"<br>
+                        <strong>The Math:</strong> Total 'Eat Out' spending grouped by Day of the Week.<br>
+                        <strong>Insight:</strong> If Friday is red, try meal-prepping specifically for Friday nights.
+                    </span>
+                </div>
+                <div id="chart-eat-out-patterns" class="w-full h-full"></div>
             </div>
+            </div>
+            
+
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question Answered:</strong> "Am I cooking enough vs ordering out?"<br>
+                        <strong>The Math:</strong> Direct comparison of the 'Groceries' category vs 'Eat Out'.
+                    </span>
+                </div>
+                <div id="chart-groceries" class="w-full h-full"></div>
+            </div>
+        </div>
+
+        
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Question Answered:</strong> "How has my utility bill been over the past years?"<br>
+                        <strong>The Math:</strong> Cumulative running total of utilities.<br>
+                    </span>
+                </div>
+                <div id="chart-yoy-comparison" class="w-full h-full"></div>
+            </div>
+            
 
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[600px] relative">
                  <div class="absolute top-4 left-4 z-10 tooltip-container">
@@ -380,18 +397,24 @@
         </div>
 
         <div class="w-full mb-8">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
+           <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-200 dark:border-blue-900 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "Is my core lifestyle inflation kept in check?"<br>
-                        <strong>The Math:</strong> Cumulative running total of Core Expenses for This Year vs Last Year.<br>
-                        <strong>Goal:</strong> Keep the Solid Line (This Year) below the Dashed Line (Last Year).
+                        <strong>What is this?</strong> Your budget balance sheet.<br>
+                        <strong>Question Answered:</strong> "Did I earn more than I spent this month?"<br>
+                        <strong>The Math:</strong><br>
+                        <span class="text-green-400">Income:</span> Sum of ALL transactions categorized as 'Income'.<br>
+                        <span class="text-red-400">Expense:</span> Sum of ALL transactions categorized as 'Expense'.<br>
+                        <span class="text-yellow-500">Line:</span> Cumulative Savings (Income - Expense) over time.<br>
+                        <strong>Filtered Out:</strong> ALL Transfers (credit card payments, savings moves) to show true P&L.
                     </span>
                 </div>
-                <div id="chart-yoy-comparison" class="w-full h-full"></div>
+                <div id="chart-income-expense" class="w-full h-full"></div>
             </div>
         </div>
+
+
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
 
@@ -469,6 +492,7 @@
                 const plot9 = {{ chart_core_summary|safe if chart_core_summary else 'null' }}; 
                 const plot10 = {{ chart_core_breakdown|safe if chart_core_breakdown else 'null' }};
                 const plot11 = {{ chart_hsa_activity|safe if chart_hsa_activity else 'null' }}; // NEW CHART
+                const plot12 = {{ chart_eat_out_patterns|safe if chart_eat_out_patterns else 'null' }};
 
                 renderChart(plot1, 'chart-income-expense');
                 renderChart(plot4, 'chart-core-operating');
@@ -479,6 +503,7 @@
                 renderChart(plot8, 'chart-yoy-comparison');
                 renderChart(plot5, 'chart-groceries');
                 renderChart(plot11, 'chart-hsa-activity');
+                renderChart(plot12, 'chart-eat-out-patterns');
             }
 
             var themeToggleBtn = document.getElementById('theme-toggle');

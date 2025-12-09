@@ -577,6 +577,51 @@ class DashboardService:
                 if key not in groups: groups[key] = []
                 groups[key].append(t)
         return groups
+    
+    def _chart_eat_out_patterns(self, start_date, end_date):
+        # Initialize buckets for Mon(0) to Sun(6)
+        dow_totals = {i: 0.0 for i in range(7)}
+        dow_counts = {i: 0 for i in range(7)}
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        # Filter for 'Eat Out' transactions in the valid range
+        txs = [t for t in self.core_transactions 
+               if start_date <= t.date <= end_date 
+               and t.category.name == 'Eat Out']
+        
+        for t in txs:
+            idx = t.date.weekday() # 0=Mon, 6=Sun
+            dow_totals[idx] += float(abs(t.amount))
+            dow_counts[idx] += 1
+            
+        # Prepare Data for Plotly
+        y_vals = [dow_totals[i] for i in range(7)]
+        # Calculate Average Transaction size per day (optional, for hover text)
+        avgs = [dow_totals[i]/dow_counts[i] if dow_counts[i] > 0 else 0 for i in range(7)]
+        
+        # Color scale: Highlight the highest spending day
+        max_val = max(y_vals) if y_vals else 1
+        colors = ['#ef4444' if val == max_val else '#6366f1' for val in y_vals]
+
+        fig = go.Figure(data=[go.Bar(
+            x=days, 
+            y=y_vals, 
+            marker_color=colors,
+            text=y_vals,
+            texttemplate='$%{y:,.0f}',
+            textposition='auto',
+            hovertemplate='<b>%{x}</b><br>Total: $%{y:,.2f}<br>Avg Ticket: $%{customdata:,.2f}<extra></extra>',
+            customdata=avgs
+        )])
+        
+        fig.update_layout(
+            title='Eat Out Spending by Day of Week',
+            yaxis=dict(title='Total Spent ($)', tickformat="$,.0f"),
+            xaxis=dict(title=''),
+            margin=self.margin_std,
+            **self.base_layout
+        )
+        return to_json(fig, pretty=True)
 
     def generate_all_charts(self):
         # Calculate time range
@@ -627,7 +672,8 @@ class DashboardService:
             'chart_top_payees': self._chart_top_payees(self.core_transactions, start_date), # Logic differs (aggregate total), pass raw list
             'chart_yoy': self._chart_yoy(), # Explicitly stays Monthly per user request
             'chart_core_breakdown': self._chart_core_breakdown(periods, period_strs, grouped_core, shapes, anns),
-            'chart_hsa_activity': self._chart_hsa_activity(periods, period_strs, start_date, end_date) 
+            'chart_hsa_activity': self._chart_hsa_activity(periods, period_strs, start_date, end_date),
+            'chart_eat_out_patterns': self._chart_eat_out_patterns(start_date, end_date)
         }
 
     # --- Refactored Chart Methods (Using Grouped Data) ---
