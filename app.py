@@ -65,9 +65,11 @@ class StatementRecord(db.Model, TimestampMixin):
     """Tracks uploaded PDF statement periods to prevent duplicates."""
     id = db.Column(db.Integer, primary_key=True)
     account_id = db.Column(db.Integer, db.ForeignKey('account.id'), nullable=False)
-    start_date = db.Column(db.Date, nullable=False)
+    start_date = db.Column(db.Date, nullable=False, index=True)
     end_date = db.Column(db.Date, nullable=False)
     
+    account = db.relationship('Account', backref='statement_records', lazy=True)
+
     __table_args__ = (
         db.UniqueConstraint('account_id', 'start_date', 'end_date', name='_statement_period_uc'),
     )
@@ -442,11 +444,41 @@ def get_monthly_summary_direct(month_offset):
 
 class DashboardService:
     def __init__(self, view_mode='monthly'):
-        self.today = date.today()
         self.view_mode = view_mode
         
-        # Calculate start date based on configuration
-        # For weekly view, we ensure we cover roughly the same time span
+        # 1. Determine Core Anchor Date
+        # Logic: Find the max date available for EACH core account type separately.
+        # Then take the MINIMUM of those dates.
+        # Example: Checking has Dec 11, CC has Nov 11 -> We use Nov 11.
+        # This prevents the dashboard from showing a month where one major account is missing data.
+        
+        core_types = ['checking', 'savings', 'credit_card']
+        
+        # Get the max statement date for each account type present in the database
+        type_max_dates = db.session.query(func.max(StatementRecord.end_date))\
+            .join(Account)\
+            .filter(Account.account_type.in_(core_types))\
+            .group_by(Account.account_type)\
+            .all()
+            
+        # type_max_dates returns a list of tuples like [(date(2025,11,11),), (date(2025,12,11),)]
+        valid_dates = [d[0] for d in type_max_dates if d[0] is not None]
+        
+        if valid_dates:
+            # We take the MIN of the MAXs
+            self.today = min(valid_dates)
+        else:
+            # Fallback if no statements exist at all
+            self.today = date.today()
+
+        # 2. Determine HSA Anchor Date (Independent of Core)
+        hsa_max_date = db.session.query(func.max(StatementRecord.end_date))\
+            .join(Account)\
+            .filter(Account.account_type == 'hsa').scalar()
+            
+        self.hsa_today = hsa_max_date if hsa_max_date else date.today()
+        
+        # Calculate start date based on configuration (using Core date)
         months_back = max(24, DASHBOARD_MONTH_SPAN + 6) 
         
         y_hist, m_hist = self.today.year, self.today.month - months_back
@@ -456,7 +488,6 @@ class DashboardService:
         
         self.fetch_start_date = date(y_hist, m_hist, 1)
         
-        # ... [Keep existing transaction fetching logic unchanged] ...
         # Fetch ALL transactions first
         all_txs = Transaction.query.options(
             joinedload(Transaction.category),
@@ -483,7 +514,6 @@ class DashboardService:
         tick_fmt = '%b %Y' if self.view_mode == 'monthly' else '%b %d'
         self.xaxis_date = dict(rangeslider=dict(visible=True), type='date', tickformat=tick_fmt)
         self.xaxis_cat = dict(rangeslider=dict(visible=False), type='category')
-
     # [Keep get_summary_for_dashboard unchanged]
     def get_summary_for_dashboard(self, month_offset):
         # ... [Existing implementation] ...
@@ -505,8 +535,21 @@ class DashboardService:
         
         uncat = Transaction.query.join(Payee).filter(Payee.rule_id == None, Transaction.is_deleted == False).count()
         dup_count = 0 
-        return {'start_date': start, 'end_date': end, 'current_month_name': current_month_name, 'total_income': float(inc), 'total_expense': float(exp), 'net_worth': net_worth, 'account_balances': balances, 'uncategorized_count': uncat, 'savings_in': float(s_in), 'savings_out': float(s_out), 'duplicate_count': dup_count}
-
+        return {
+            'start_date': start, 
+            'end_date': end, 
+            'current_month_name': current_month_name, 
+            'total_income': float(inc), 
+            'total_expense': float(exp), 
+            'net_worth': net_worth, 
+            'account_balances': balances, 
+            'uncategorized_count': uncat, 
+            'savings_in': float(s_in), 
+            'savings_out': float(s_out), 
+            'duplicate_count': dup_count,
+            'data_anchor_date': self.today 
+        }
+    
     def _get_period_key(self, date_obj):
         """Helper to normalize dates to the start of the period (Month 1st or Monday)."""
         if self.view_mode == 'weekly':
@@ -960,6 +1003,13 @@ def index(month_offset):
 def upload_file():
     account_id = request.form.get('account_id')
     files = request.files.getlist('file')
+    
+    # Capture manual dates if provided (specifically for CSVs)
+    manual_start_str = request.form.get('start_date')
+    manual_end_str = request.form.get('end_date')
+    manual_start = try_parse_date(manual_start_str)
+    manual_end = try_parse_date(manual_end_str)
+
     if not account_id or not files: return redirect(url_for('index'))
     account = db.session.get(Account, account_id)
     if not account: abort(404)
@@ -969,34 +1019,56 @@ def upload_file():
     for file in files:
         try:
             df = pd.DataFrame()
+            p_start, p_end = None, None
+
+            # 1. Handle CSV (Uses Manual Dates)
             if file.filename.lower().endswith('.csv'):
                 stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
                 df = pd.read_csv(stream)
+                
+                # CSV Processing Logic
                 if df.shape[1] >= 5:
                     df = df.iloc[:, [0, 1, 4]]
                     df.columns = ['Date', 'Amount', 'Description']
-                else: continue
-            elif file.filename.lower().endswith('.pdf'):
-                data, p_start, p_end = None, None, None
-                if account.account_type == 'hsa':
-                    data, p_start, p_end = parse_hsa_pdf(file.stream)
-                elif account.account_type in ['checking', 'savings']:
-                    data, p_start, p_end = parse_wellsfargo_pdf(file.stream)
-                else:
-                    data, p_start, p_end = parse_chase_pdf(file.stream)
                 
-                if p_start and p_end:
-                    existing = StatementRecord.query.filter_by(account_id=account.id, start_date=p_start, end_date=p_end).first()
-                    if existing:
-                        flash(f"Skipped {file.filename}: Statement period {p_start} - {p_end} already exists.", "warning")
-                        continue
-                    db.session.add(StatementRecord(account_id=account.id, start_date=p_start, end_date=p_end))
-                    db.session.commit()
+                # Use manual dates for CSVs if provided
+                if manual_start and manual_end:
+                    p_start, p_end = manual_start, manual_end
+                
+            # 2. Handle PDF (Attempts Parsing, falls back to Manual)
+            elif file.filename.lower().endswith('.pdf'):
+                data = None
+                if account.account_type == 'hsa':
+                    data, parsed_start, parsed_end = parse_hsa_pdf(file.stream)
+                elif account.account_type in ['checking', 'savings']:
+                    data, parsed_start, parsed_end = parse_wellsfargo_pdf(file.stream)
+                else:
+                    data, parsed_start, parsed_end = parse_chase_pdf(file.stream)
+                
+                # Use parsed dates, override with manual if parsed failed but manual exists
+                p_start = parsed_start if parsed_start else manual_start
+                p_end = parsed_end if parsed_end else manual_end
 
                 if data: df = pd.DataFrame(data)
             
+            # 3. Record Statement Period (Logic Check)
+            if p_start and p_end:
+                # Check for exact duplicate period
+                existing = StatementRecord.query.filter_by(account_id=account.id, start_date=p_start, end_date=p_end).first()
+                if existing:
+                    flash(f"Skipped {file.filename}: Statement period {p_start} - {p_end} already recorded.", "warning")
+                    # We continue to process transactions even if period exists, 
+                    # or you can 'continue' here to skip file entirely if that's preferred.
+                    # Per requirement "display what we have", preventing duplicate tracking is key.
+                else:
+                    db.session.add(StatementRecord(account_id=account.id, start_date=p_start, end_date=p_end))
+                    db.session.commit()
+            elif file.filename.lower().endswith('.csv') and (not manual_start or not manual_end):
+                 flash(f"Warning: CSV uploaded without date range. Statement history not updated for {file.filename}.", "warning")
+
             if df.empty: continue
 
+            # 4. Transaction Processing (Existing Logic)
             new_transactions = []
             for _, row in df.iterrows():
                 try:
@@ -1052,6 +1124,65 @@ def manage_payees():
     has_prev = start > 0
     
     return render_template('manage_payees.html', payees_data=payees_paginated, rules=rules, search_query=search_query, page=page, has_next=has_next, has_prev=has_prev)
+
+@app.route('/statement_history')
+def statement_history():
+    # 1. Get Filter Parameters
+    page = request.args.get('page', 1, type=int)
+    account_filter = request.args.get('account_id', type=int)
+    year_filter = request.args.get('year', type=int)
+    per_page = 20
+
+    # 2. Build Query
+    query = db.session.query(StatementRecord).join(Account).order_by(StatementRecord.start_date.desc())
+
+    if account_filter:
+        query = query.filter(StatementRecord.account_id == account_filter)
+    
+    if year_filter:
+        # Filter by the start_date's year
+        query = query.filter(extract('year', StatementRecord.start_date) == year_filter)
+
+    # 3. Paginate
+    total_records = query.count()
+    # Manual slicing for pagination logic consistent with app style
+    start = (page - 1) * per_page
+    end = start + per_page
+    records = query.slice(start, end).all()
+    
+    # 4. Filter Options Data
+    accounts = Account.query.order_by(Account.name).all()
+    
+    # Get distinct years from StatementRecords for the dropdown
+    available_years_query = db.session.query(extract('year', StatementRecord.start_date)).distinct().order_by(extract('year', StatementRecord.start_date).desc()).all()
+    available_years = [int(y[0]) for y in available_years_query]
+
+    # Pagination controls
+    has_next = total_records > end
+    has_prev = page > 1
+    total_pages = (total_records + per_page - 1) // per_page
+
+    return render_template(
+        'statement_history.html', 
+        records=records, 
+        accounts=accounts, 
+        available_years=available_years,
+        current_account=account_filter,
+        current_year=year_filter,
+        page=page,
+        has_next=has_next,
+        has_prev=has_prev,
+        total_pages=total_pages
+    )
+
+@app.route('/delete_statement_record/<int:record_id>', methods=['POST'])
+def delete_statement_record(record_id):
+    record = db.session.get(StatementRecord, record_id)
+    if record:
+        db.session.delete(record)
+        db.session.commit()
+        flash("Statement period record deleted (Transactions remain).", "success")
+    return redirect(url_for('statement_history'))
 
 @app.route('/manage_payees/add', methods=['POST'])
 def add_payee():
@@ -1155,8 +1286,16 @@ def apply_rule_force(rule_id):
 def run_all_rules_force():
     rules = PayeeRule.query.order_by(PayeeRule.id.asc()).all()
     total = 0
+    # This function (defined on line 147) scans all payees for each rule
     for r in rules: total += run_rule_on_all_payees(r, overwrite=True)
+    
     flash(f"Ran {len(rules)} rules. Updated {total} payees.", "success")
+    
+    # NEW: Check if a 'next' URL was passed (e.g., from Manage Payees page)
+    next_page = request.args.get('next')
+    if next_page:
+        return redirect(next_page)
+        
     return redirect(url_for('manage_rules'))
 
 @app.route('/categorize', methods=['GET','POST'])
