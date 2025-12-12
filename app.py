@@ -1344,6 +1344,8 @@ def run_all_rules_force():
         
     return redirect(url_for('manage_rules'))
 
+
+
 @app.route('/categorize', methods=['GET','POST'])
 def categorize():
     if request.method == 'POST':
@@ -1768,14 +1770,19 @@ def trends():
         if c.type not in grouped_categories: grouped_categories[c.type] = []
         grouped_categories[c.type].append(c)
     
-    # FIX: Retrieve all accounts to pass to the template
     accounts = Account.query.order_by(Account.name).all()
     
     results = db.session.query(func.coalesce(PayeeRule.display_name, Payee.name).label('label')).select_from(Payee).outerjoin(PayeeRule).distinct().order_by('label').all()
     unique_labels = [r.label for r in results if r.label]
     
-    # FIX: Pass 'accounts' to the template
-    return render_template('trends.html', grouped_categories=grouped_categories, all_events=Event.query.all(), payee_labels=unique_labels, accounts=accounts)
+    # CHANGED: Added EXCLUDED_CAT_CORE and EXCLUDED_CAT to the context
+    return render_template('trends.html', 
+                           grouped_categories=grouped_categories, 
+                           all_events=Event.query.all(), 
+                           payee_labels=unique_labels, 
+                           accounts=accounts,
+                           excluded_core=EXCLUDED_CAT_CORE,
+                           excluded_cat=EXCLUDED_CAT)
 
 @app.route('/api/trend_data', methods=['POST'])
 def get_trend_data():

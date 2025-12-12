@@ -44,6 +44,25 @@
             </a>
 
             <form id="trends-form" class="space-y-4">
+                <div class="mb-6 p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg border border-indigo-100 dark:border-indigo-800">
+                <h3 class="text-xs font-bold text-indigo-800 dark:text-indigo-300 uppercase tracking-wide mb-2">
+                    <i class="fa-solid fa-magic mr-1"></i> Dashboard Presets
+                </h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <button type="button" onclick="applyPreset('income_vs_expense')" class="text-xs bg-white dark:bg-gray-800 hover:bg-indigo-50 dark:hover:bg-indigo-900 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 text-gray-700 dark:text-gray-300 shadow-sm transition">
+                        Income vs Exp
+                    </button>
+                    <button type="button" onclick="applyPreset('core_operating')" class="text-xs bg-white dark:bg-gray-800 hover:bg-indigo-50 dark:hover:bg-indigo-900 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 text-gray-700 dark:text-gray-300 shadow-sm transition">
+                        Core Operating
+                    </button>
+                    <button type="button" onclick="applyPreset('groceries')" class="text-xs bg-white dark:bg-gray-800 hover:bg-indigo-50 dark:hover:bg-indigo-900 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 text-gray-700 dark:text-gray-300 shadow-sm transition">
+                        Food & Dining
+                    </button>
+                    <button type="button" onclick="applyPreset('clear')" class="text-xs bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-800 rounded px-2 py-1.5 text-red-700 dark:text-red-400 shadow-sm transition">
+                        Clear All
+                    </button>
+                </div>
+            </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         <i class="fa-solid fa-calendar-days w-4 mr-1"></i>Date Range
@@ -133,7 +152,10 @@
                                 <div class="space-y-1 pl-2">
                                     {% for cat in categories %}
                                     <label class="flex items-center cursor-pointer item-label">
-                                        <input type="checkbox" name="category_ids" value="{{ cat.id }}" class="h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded">
+                                        <input type="checkbox" name="category_ids" value="{{ cat.id }}" 
+                                               data-name="{{ cat.name }}" 
+                                               data-group="{{ group_name }}"
+                                               class="h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded">
                                         <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">{{ cat.name }}</span>
                                     </label>
                                     {% endfor %}
@@ -213,6 +235,59 @@
     </div>
 
     <script>
+        const EXCLUDED_CORE = {{ excluded_core|tojson }};
+        const EXCLUDED_CAT = "{{ excluded_cat }}"; // Single string
+
+        function applyPreset(presetName) {
+            // 1. Reset all checkboxes
+            document.querySelectorAll('input[type="checkbox"]').forEach(el => el.checked = false);
+            
+            // 2. Default Chart Settings
+            document.querySelector('input[name="chart_type"][value="bar"]').checked = true;
+            document.querySelector('input[name="time_bucket"][value="month"]').checked = true;
+
+            const catInputs = document.querySelectorAll('input[name="category_ids"]');
+            
+            if (presetName === 'clear') return;
+
+            if (presetName === 'income_vs_expense') {
+                catInputs.forEach(input => {
+                    const group = input.dataset.group;
+                    const name = input.dataset.name;
+                    // Select Income and Expenses, excluding the global ignored category
+                    if ((group === 'Income' || group === 'Expense') && name !== EXCLUDED_CAT) {
+                        input.checked = true;
+                    }
+                });
+            }
+            else if (presetName === 'core_operating') {
+                catInputs.forEach(input => {
+                    const group = input.dataset.group;
+                    const name = input.dataset.name;
+                    // Logic: Income + Expense, MINUS global excluded MINUS core excluded
+                    if ((group === 'Income' || group === 'Expense') && 
+                        name !== EXCLUDED_CAT && 
+                        !EXCLUDED_CORE.includes(name)) {
+                        input.checked = true;
+                    }
+                });
+            }
+            else if (presetName === 'groceries') {
+                catInputs.forEach(input => {
+                    const name = input.dataset.name;
+                    if (name === 'Groceries' || name === 'Eat Out') {
+                        input.checked = true;
+                    }
+                });
+            }
+
+            // 3. Re-check all Accounts (default behavior usually includes accounts)
+            document.querySelectorAll('input[name="account_ids"]').forEach(el => el.checked = true);
+            
+            // 4. Trigger Chart Generation
+            document.getElementById('generate-chart').click();
+        }
+        
         document.addEventListener('DOMContentLoaded', function() {
             const form = document.getElementById('trends-form');
             const chartContainer = document.getElementById('chart-container');
