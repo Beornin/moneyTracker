@@ -27,10 +27,16 @@ db = SQLAlchemy(app)
 # CONFIGURATION: How many months to show on dashboard charts
 DASHBOARD_MONTH_SPAN = 12
 
+#ignored from importing as this comes from checking paying the CC
 EXCLUDED_CAT = 'Ignored Credit Card Payment'
+
+#For us these categories are from a different pot of money outside this system, so do not use them for core calculations
 EXCLUDED_CAT_CORE = ['Car Payment', 'VUL', 'AC Payment', 'Taxes']
+
+#For us these specific payees are from a different pot of money outside this system, so do not use them for core calculations
 EXCLUDED_PAYEE_LABELS_CORE = ['Planting Oaks', 'Jaxco Furniture','Planting Oaks', 'Step Up','Jiu Jitsu','Abeka','Christianbook'
-                              ,'New Leaf Publishing','Veritas']
+                              ,'New Leaf Publishing','Veritas','Sp Goodandbeautiful Goodandbeauti Ut']
+#,'Simplify Health','Fullscript','Kbmo Diagnostics','Rupa Labs']
 
 CHASE_DATE_REGEX = re.compile(r"Opening/Closing Date\s*([\d/]+)\s*-\s*([\d/]+)")
 CHASE_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*)")
@@ -551,9 +557,12 @@ class DashboardService:
         }
     
     def _get_period_key(self, date_obj):
-        """Helper to normalize dates to the start of the period (Month 1st or Monday)."""
+        """Helper to normalize dates to the start of the period (Month 1st or Sunday)."""
         if self.view_mode == 'weekly':
-            return date_obj - timedelta(days=date_obj.weekday())
+            # Python weekday(): Mon=0 ... Sun=6
+            # To make Sunday the start (offset 0), we shift: (weekday + 1) % 7
+            idx = (date_obj.weekday() + 1) % 7
+            return date_obj - timedelta(days=idx)
         return date_obj.replace(day=1)
 
     def _get_event_overlays(self, start, end):
@@ -630,8 +639,9 @@ class DashboardService:
         if self.view_mode == 'weekly':
             # For weekly, cover roughly the same timeframe (52 weeks ~ 1 year)
             start_date = self.today - timedelta(weeks=months_back * 4.3)
-            # Align to Monday
-            start_date = start_date - timedelta(days=start_date.weekday())
+            # Align to Sunday
+            idx = (start_date.weekday() + 1) % 7
+            start_date = start_date - timedelta(days=idx)
         else:
             y_start, m_start = self.today.year, self.today.month - months_back
             while m_start <= 0: 
@@ -1013,8 +1023,9 @@ def generate_buckets(start_date, end_date, bucket_type):
     elif bucket_type == 'month':
         current = current.replace(day=1)
     elif bucket_type == 'week':
-        # Align to Monday (Postgres default)
-        current = current - timedelta(days=current.weekday())
+        # Align to Sunday
+        idx = (current.weekday() + 1) % 7
+        current = current - timedelta(days=idx)
 
     while current <= end_date:
         buckets.append(current.strftime('%Y-%m-%d'))
@@ -1804,8 +1815,15 @@ def get_trend_data():
     data_by_item = {}
     sorted_buckets = generate_buckets(s_date, e_date, bucket)
     
-    if cat_ids:
+    # DEFINE BUCKET COLUMN WITH SUNDAY SHIFT
+    if bucket == 'week':
+        # Shift date forward 1 day so Sunday becomes Monday (start of standard week), 
+        # truncate, then shift back 1 day.
+        bucket_col = func.date_trunc('week', Transaction.date + text("INTERVAL '1 DAY'")) - text("INTERVAL '1 DAY'")
+    else:
         bucket_col = func.date_trunc(bucket, Transaction.date)
+    
+    if cat_ids:
         query = db.session.query(bucket_col.label('bucket_start'), Category.name.label('name'), func.sum(Transaction.amount).label('total')).select_from(Transaction).join(Category).filter(Transaction.date >= s_date, Transaction.date <= e_date, Transaction.is_deleted == False, Transaction.category_id.in_(cat_ids))
         
         # FIX: Apply Account ID filter
@@ -1819,7 +1837,6 @@ def get_trend_data():
             data_by_item[row.name][b_date] = data_by_item[row.name].get(b_date, 0) + abs(float(row.total))
 
     if payee_names:
-        bucket_col = func.date_trunc(bucket, Transaction.date)
         name_col = func.coalesce(PayeeRule.display_name, Payee.name)
         query = db.session.query(bucket_col.label('bucket_start'), name_col.label('name'), func.sum(Transaction.amount).label('total')).select_from(Transaction).join(Payee).outerjoin(PayeeRule).filter(Transaction.date >= s_date, Transaction.date <= e_date, Transaction.is_deleted == False, name_col.in_(payee_names))
         
