@@ -5,11 +5,19 @@ A robust Flask-based personal finance dashboard designed for granular control ov
 ## 🚀 Features
 
 ### 1. Dashboards & Analysis
-* **Main Dashboard**: 
-    * **Income vs. Expense**: Monthly P&L excluding transfers and hidden categories.
-    * **Core Operating**: Tracks "Day-to-Day" lifestyle costs, filtering out large fixed costs (like Mortgages/Car Payments) to show true discretionary spending.
-    * **Savings Rate**: Visualizes money moving into vs. out of Savings accounts.
-    * **HSA Activity**: A dedicated section for Health Savings Account expenses (medical only), separated from the main operating budget.
+* **Main Dashboard** (with Weekly/Monthly toggle and Year selector):
+    * **Income vs. Expense**: Operating performance chart showing regular income (green), investment withdrawals (red), expenses (blue), and cumulative surplus. Investment transfers are treated as savings, not expenses.
+    * **Net Savings Flow**: Tracks money moving into vs. out of Savings accounts with color-coded bars (green for net positive, red for net negative).
+    * **Net Cash Flow**: Overall cash flow visualization across all accounts, excluding hidden categories.
+    * **Core Operating Performance**: Tracks "Day-to-Day" lifestyle income and expenses with cumulative surplus tracking.
+    * **Groceries vs. Eating Out**: Stacked bar chart comparing grocery spending to dining out, with average trend lines.
+    * **Savings Rate Trend**: Percentage-based savings rate with benchmark lines (20% good, 50% excellent). Investment transfers excluded from expense calculations.
+    * **Top 20 Core Operating Payees**: Horizontal bar chart showing biggest expense destinations.
+    * **Top 10 Income Sources**: Shows primary sources of income in the selected view period.
+    * **YoY Comparison**: 3-year comparison of JEA utility expenses by month.
+    * **Core Expenses by Category**: Stacked area chart breaking down spending by category over time.
+    * **HSA Activity**: Dedicated section for Health Savings Account expenses (medical only), separated from main operating budget.
+    * **Eat Out Patterns**: Day-of-week analysis showing when dining spending peaks.
 * **Trend Analysis**: Interactive line/bar/area charts to visualize spending over time by Category, Payee, or Account.
 * **Monthly Averages**: A powerful calculator to determine the average monthly spend for specific categories or payees over a selected date range.
     * **Drill-down**: View sub-rows for individual payees within a category total.
