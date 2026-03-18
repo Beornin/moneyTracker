@@ -749,6 +749,7 @@ class DashboardService:
         # Initialize buckets for Mon(0) to Sun(6)
         dow_totals = {i: 0.0 for i in range(7)}
         dow_counts = {i: 0 for i in range(7)}
+        dow_payees = {i: {} for i in range(7)}  # Track payee visit counts per day
         days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
         
         # Filter for 'Eat Out' transactions in the valid range
@@ -760,11 +761,23 @@ class DashboardService:
             idx = t.date.weekday() # 0=Mon, 6=Sun
             dow_totals[idx] += float(abs(t.amount))
             dow_counts[idx] += 1
+            # Track payee visit counts
+            payee_name = t.entity.name
+            dow_payees[idx][payee_name] = dow_payees[idx].get(payee_name, 0) + 1
             
         # Prepare Data for Plotly
         y_vals = [dow_totals[i] for i in range(7)]
         # Calculate Average Transaction size per day (optional, for hover text)
         avgs = [dow_totals[i]/dow_counts[i] if dow_counts[i] > 0 else 0 for i in range(7)]
+        
+        # Find most visited restaurant for each day
+        top_restaurants = []
+        for i in range(7):
+            if dow_payees[i]:
+                top_payee = max(dow_payees[i].items(), key=lambda x: x[1])
+                top_restaurants.append(f"👑 {top_payee[0]}")
+            else:
+                top_restaurants.append("")
         
         # Color scale: Highlight the highest spending day
         max_val = max(y_vals) if y_vals else 1
@@ -781,11 +794,26 @@ class DashboardService:
             customdata=avgs
         )])
         
+        # Add annotations for top restaurant per day
+        annotations = []
+        for i, day in enumerate(days):
+            if top_restaurants[i]:
+                annotations.append({
+                    'x': day,
+                    'y': y_vals[i],
+                    'text': top_restaurants[i],
+                    'showarrow': False,
+                    'yanchor': 'bottom',
+                    'yshift': 10,
+                    'font': {'size': 9, 'color': '#4b5563'}
+                })
+        
         fig.update_layout(
             title='Eat Out Spending by Day of Week',
             yaxis=dict(title='Total Spent ($)', tickformat="$,.0f"),
             xaxis=dict(title=''),
             margin=self.margin_std,
+            annotations=annotations,
             **self.base_layout
         )
         return to_json(fig, pretty=True)
@@ -903,7 +931,7 @@ class DashboardService:
         return to_json(fig, pretty=True)
 
     def _chart_income_vs_expense(self, periods, period_strs, grouped_txs, shapes, anns):
-        """Operating Performance (excluding Investment Transfers) - Income vs Expenses with cumulative surplus"""
+        """Building Wealth (Excl. Investments)"""
         regular_inc, investment_withdrawals, c_exp = [], [], []
         cumulative_surplus = 0.0
         cumulative_net = []
@@ -920,7 +948,8 @@ class DashboardService:
             # Investment transfers to investments are savings, not expenses
             exp_val = float(abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.name != EXCLUDED_CAT and t.category.name != 'Investment')))
             
-            current_surplus = total_inc - exp_val
+            # Cumulative surplus excludes investment withdrawals (only regular income vs expenses)
+            current_surplus = regular_inc_val - exp_val
             cumulative_surplus += current_surplus
             regular_inc.append(regular_inc_val)
             investment_withdrawals.append(invest_withdrawal_val)
@@ -935,7 +964,7 @@ class DashboardService:
         fig.add_trace(go.Bar(name='Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
         fig.add_trace(go.Scatter(name='Cumulative Surplus', x=period_strs, y=cumulative_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
         fig.update_layout(
-            title='Operating Performance (Excl. Investment Transfers)', 
+            title='Building Wealth (Excl. Investments)', 
             barmode='group', 
             yaxis=dict(title='$', tickformat="$,.0f"), 
             xaxis=self.xaxis_date, 
