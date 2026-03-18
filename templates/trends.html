@@ -6,12 +6,8 @@
     <title>Trend Analysis</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-
-    <script>
-        tailwind.config = { darkMode: 'class' }
-    </script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
@@ -144,24 +140,14 @@
                     <input type="text" id="cat-search" placeholder="Filter categories..." 
                            class="w-full mb-2 px-3 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm shadow-sm focus:ring-blue-500 focus:border-blue-500">
                     
-                    <div id="category-list" class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-64 overflow-y-auto category-list space-y-3">
-                        {% for group_name, categories in grouped_categories.items() %}
-                            {% if group_name.lower() != 'transfers' %}
-                            <div>
-                                <h4 class="font-semibold text-gray-800 dark:text-gray-200 text-sm mb-1 group-header">{{ group_name }}</h4>
-                                <div class="space-y-1 pl-2">
-                                    {% for cat in categories %}
-                                    <label class="flex items-center cursor-pointer item-label">
-                                        <input type="checkbox" name="category_ids" value="{{ cat.id }}" 
-                                               data-name="{{ cat.name }}" 
-                                               data-group="{{ group_name }}"
-                                               class="h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded">
-                                        <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">{{ cat.name }}</span>
-                                    </label>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                            {% endif %}
+                    <div id="category-list" class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-64 overflow-y-auto category-list space-y-1">
+                        {% for cat in categories %}
+                            <label class="flex items-center cursor-pointer item-label">
+                                <input type="checkbox" name="category_ids" value="{{ cat.id }}" 
+                                       data-name="{{ cat.name }}" 
+                                       class="h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded">
+                                <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">{{ cat.name }}</span>
+                            </label>
                         {% endfor %}
                     </div>
                 </div>
@@ -222,7 +208,40 @@
         </div>
 
         <div class="flex-grow p-6 md:p-10 overflow-y-auto h-screen">
-            <div id="chart-container" class="w-full h-[90vh] min-h-[500px] bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4">
+            <!-- Tab Navigation -->
+            <div class="flex space-x-1 mb-4 bg-white dark:bg-gray-800 rounded-lg shadow p-1">
+                <button onclick="switchTab('trends')" id="tab-trends" class="tab-btn flex-1 px-4 py-2 text-sm font-semibold rounded-md transition bg-indigo-600 text-white">
+                    <i class="fa-solid fa-chart-line mr-1"></i> Trends
+                </button>
+                <button onclick="switchTab('yoy')" id="tab-yoy" class="tab-btn flex-1 px-4 py-2 text-sm font-semibold rounded-md transition text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <i class="fa-solid fa-arrows-rotate mr-1"></i> Year-over-Year
+                </button>
+                <button onclick="switchTab('velocity')" id="tab-velocity" class="tab-btn flex-1 px-4 py-2 text-sm font-semibold rounded-md transition text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <i class="fa-solid fa-gauge-high mr-1"></i> Spending Velocity
+                </button>
+            </div>
+
+            <!-- Velocity Summary Cards (hidden by default) -->
+            <div id="velocity-summary" class="hidden grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-3 text-center">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Daily Burn Rate</p>
+                    <p id="vel-daily-rate" class="text-xl font-bold text-indigo-600 dark:text-indigo-400">--</p>
+                </div>
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-3 text-center">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Spent So Far</p>
+                    <p id="vel-current" class="text-xl font-bold text-gray-800 dark:text-gray-200">--</p>
+                </div>
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-3 text-center">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Projected EOM</p>
+                    <p id="vel-projected" class="text-xl font-bold text-amber-600 dark:text-amber-400">--</p>
+                </div>
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-3 text-center">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Prior Month Total</p>
+                    <p id="vel-prior" class="text-xl font-bold text-gray-500 dark:text-gray-400">--</p>
+                </div>
+            </div>
+
+            <div id="chart-container" class="w-full h-[80vh] min-h-[500px] bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4">
                 <div id="loading-spinner-container" class="h-full w-full flex-col hidden items-center justify-center text-center">
                     <div id="loading-spinner"></div>
                     <p class="mt-4 text-lg font-medium text-gray-700 dark:text-gray-300">Fetching data...</p>
@@ -236,25 +255,136 @@
 
     <script>
         const EXCLUDED_CORE = {{ excluded_core|tojson }};
-        const EXCLUDED_CAT = "{{ excluded_cat }}"; // Single string
+        const EXCLUDED_CAT = "{{ excluded_cat }}";
+        let currentTab = 'trends';
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('bg-indigo-600', 'text-white');
+                btn.classList.add('text-gray-600', 'dark:text-gray-300');
+            });
+            const activeBtn = document.getElementById('tab-' + tab);
+            activeBtn.classList.add('bg-indigo-600', 'text-white');
+            activeBtn.classList.remove('text-gray-600', 'dark:text-gray-300');
+
+            document.getElementById('velocity-summary').classList.toggle('hidden', tab !== 'velocity');
+
+            if (tab === 'yoy' || tab === 'velocity') {
+                fetchSpecialChart(tab);
+            }
+        }
+
+        function getSelectedFilters() {
+            const form = document.getElementById('trends-form');
+            const formData = new FormData(form);
+            return {
+                category_ids: formData.getAll('category_ids'),
+                account_ids: formData.getAll('account_ids'),
+                payee_names: formData.getAll('payee_names')
+            };
+        }
+
+        function getDarkLayout() {
+            const isDarkMode = document.documentElement.classList.contains('dark');
+            return {
+                paper_bgcolor: isDarkMode ? '#1f2937' : '#ffffff',
+                plot_bgcolor: isDarkMode ? '#1f2937' : '#ffffff',
+                font: { color: isDarkMode ? '#d1d5db' : '#111827' }
+            };
+        }
+
+        async function fetchSpecialChart(tab) {
+            const chartContainer = document.getElementById('chart-container');
+            const chartPlaceholder = document.getElementById('chart-placeholder');
+            const loadingSpinner = document.getElementById('loading-spinner-container');
+            const filters = getSelectedFilters();
+
+            if (filters.category_ids.length === 0 && filters.payee_names.length === 0) {
+                chartPlaceholder.innerHTML = '<p class="text-xl text-gray-500 dark:text-gray-400">Select categories or payees first, then switch to this tab.</p>';
+                chartPlaceholder.classList.remove('hidden');
+                return;
+            }
+
+            chartPlaceholder.classList.add('hidden');
+            loadingSpinner.classList.remove('hidden');
+            loadingSpinner.classList.add('flex');
+
+            try {
+                const url = tab === 'yoy' ? "{{ url_for('api_yoy_comparison') }}" : "{{ url_for('api_spending_velocity') }}";
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(filters)
+                });
+                if (!response.ok) throw new Error('Server error: ' + response.statusText);
+                const result = await response.json();
+                if (result.error) throw new Error(result.error);
+
+                const darkLayout = getDarkLayout();
+
+                if (tab === 'yoy') {
+                    if (result.plot_data && result.plot_data.length > 0) {
+                        const layout = {
+                            title: 'Year-over-Year Comparison',
+                            barmode: 'group',
+                            xaxis: { title: '', type: 'category' },
+                            yaxis: { title: 'Amount ($)', tickformat: '$,.0f' },
+                            legend: { orientation: 'h', y: -0.15, x: 0.5, xanchor: 'center' },
+                            margin: { t: 50, b: 80, l: 80, r: 40 },
+                            ...darkLayout
+                        };
+                        Plotly.newPlot(chartContainer, result.plot_data, layout, { responsive: true });
+                    } else {
+                        chartPlaceholder.innerHTML = '<p class="text-xl text-gray-500 dark:text-gray-400">No YoY data found.</p>';
+                        chartPlaceholder.classList.remove('hidden');
+                        Plotly.purge(chartContainer);
+                    }
+                } else if (tab === 'velocity') {
+                    if (result.plot_data && result.plot_data.length > 0) {
+                        const s = result.summary;
+                        document.getElementById('vel-daily-rate').textContent = '$' + s.daily_rate.toLocaleString(undefined, {minimumFractionDigits: 2});
+                        document.getElementById('vel-current').textContent = '$' + s.current_spent.toLocaleString(undefined, {minimumFractionDigits: 2});
+                        document.getElementById('vel-projected').textContent = '$' + s.projected_total.toLocaleString(undefined, {minimumFractionDigits: 2});
+                        document.getElementById('vel-prior').textContent = '$' + s.prior_month_total.toLocaleString(undefined, {minimumFractionDigits: 2});
+
+                        const layout = {
+                            title: 'Spending Velocity (Cumulative Daily Spend)',
+                            xaxis: { title: 'Day of Month', dtick: 1 },
+                            yaxis: { title: 'Cumulative ($)', tickformat: '$,.0f' },
+                            legend: { orientation: 'h', y: -0.15, x: 0.5, xanchor: 'center' },
+                            margin: { t: 50, b: 80, l: 80, r: 40 },
+                            ...darkLayout
+                        };
+                        Plotly.newPlot(chartContainer, result.plot_data, layout, { responsive: true });
+                    } else {
+                        chartPlaceholder.innerHTML = '<p class="text-xl text-gray-500 dark:text-gray-400">No velocity data found.</p>';
+                        chartPlaceholder.classList.remove('hidden');
+                        Plotly.purge(chartContainer);
+                    }
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                chartPlaceholder.innerHTML = '<p class="text-xl text-red-500 dark:text-red-400">Error: ' + error.message + '</p>';
+                chartPlaceholder.classList.remove('hidden');
+            } finally {
+                loadingSpinner.classList.add('hidden');
+                loadingSpinner.classList.remove('flex');
+            }
+        }
 
         function applyPreset(presetName) {
-            // 1. Reset all checkboxes
             document.querySelectorAll('input[type="checkbox"]').forEach(el => el.checked = false);
-            
-            // 2. Default Chart Settings
             document.querySelector('input[name="chart_type"][value="bar"]').checked = true;
             document.querySelector('input[name="time_bucket"][value="month"]').checked = true;
 
             const catInputs = document.querySelectorAll('input[name="category_ids"]');
-            
             if (presetName === 'clear') return;
 
             if (presetName === 'income_vs_expense') {
                 catInputs.forEach(input => {
                     const group = input.dataset.group;
                     const name = input.dataset.name;
-                    // Select Income and Expenses, excluding the global ignored category
                     if ((group === 'Income' || group === 'Expense') && name !== EXCLUDED_CAT) {
                         input.checked = true;
                     }
@@ -264,7 +394,6 @@
                 catInputs.forEach(input => {
                     const group = input.dataset.group;
                     const name = input.dataset.name;
-                    // Logic: Income + Expense, MINUS global excluded MINUS core excluded
                     if ((group === 'Income' || group === 'Expense') && 
                         name !== EXCLUDED_CAT && 
                         !EXCLUDED_CORE.includes(name)) {
@@ -281,10 +410,7 @@
                 });
             }
 
-            // 3. Re-check all Accounts (default behavior usually includes accounts)
             document.querySelectorAll('input[name="account_ids"]').forEach(el => el.checked = true);
-            
-            // 4. Trigger Chart Generation
             document.getElementById('generate-chart').click();
         }
         
@@ -300,30 +426,21 @@
             function setupFilter(inputId, listId) {
                 const searchInput = document.getElementById(inputId);
                 if(!searchInput) return;
-
                 searchInput.addEventListener('input', function(e) {
                     const filterTerm = e.target.value.toLowerCase();
                     const container = document.getElementById(listId);
                     const labels = container.querySelectorAll('label.item-label');
-                    
                     labels.forEach(label => {
                         const text = label.textContent.toLowerCase();
-                        if (text.includes(filterTerm)) {
-                            label.style.display = 'flex';
-                        } else {
-                            label.style.display = 'none';
-                        }
+                        label.style.display = text.includes(filterTerm) ? 'flex' : 'none';
                     });
-
                     if(listId === 'category-list') {
                         const groupDivs = container.children; 
                         for(let group of groupDivs) {
                              if(group.tagName === 'DIV') {
                                  const groupLabels = group.querySelectorAll('label.item-label');
                                  let visibleCount = 0;
-                                 groupLabels.forEach(l => {
-                                     if(l.style.display !== 'none') visibleCount++;
-                                 });
+                                 groupLabels.forEach(l => { if(l.style.display !== 'none') visibleCount++; });
                                  group.style.display = visibleCount > 0 ? 'block' : 'none';
                              }
                         }
@@ -337,7 +454,6 @@
             const today = new Date();
             const oneYearAgo = new Date();
             oneYearAgo.setFullYear(today.getFullYear() - 1);
-            
             endDateInput.value = today.toISOString().split('T')[0];
             startDateInput.value = oneYearAgo.toISOString().split('T')[0];
 
@@ -345,13 +461,10 @@
                 const originalText = allDatesButton.innerHTML;
                 allDatesButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Fetching...';
                 allDatesButton.disabled = true;
-
                 try {
                     const response = await fetch("{{ url_for('api_date_range') }}");
                     if (!response.ok) throw new Error('Could not fetch date range.');
-                    
                     const result = await response.json();
-                    
                     if (result.min_date && result.max_date) {
                         startDateInput.value = result.min_date;
                         endDateInput.value = result.max_date;
@@ -369,10 +482,14 @@
 
             form.addEventListener('submit', async function(e) {
                 e.preventDefault();
-                
+                if (currentTab !== 'trends') {
+                    fetchSpecialChart(currentTab);
+                    return;
+                }
+
                 const formData = new FormData(form);
                 const categoryIds = formData.getAll('category_ids');
-                const accountIds = formData.getAll('account_ids'); // Capture account IDs
+                const accountIds = formData.getAll('account_ids');
                 const eventIds = formData.getAll('event_ids');
                 const payeeNames = formData.getAll('payee_names'); 
                 const timeBucket = formData.get('time_bucket');
@@ -384,7 +501,6 @@
                     alert('Please select at least one category or payee to graph.');
                     return;
                 }
-                
                 if (!startDate || !endDate) {
                     alert('Please select a start and end date.');
                     return;
@@ -392,16 +508,15 @@
 
                 chartPlaceholder.classList.add('hidden');
                 loadingSpinner.classList.remove('hidden');
+                loadingSpinner.classList.add('flex');
 
                 try {
                     const response = await fetch("{{ url_for('get_trend_data') }}", {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             category_ids: categoryIds,
-                            account_ids: accountIds, // Send to API
+                            account_ids: accountIds,
                             payee_names: payeeNames, 
                             event_ids: eventIds,
                             start_date: startDate,
@@ -411,57 +526,38 @@
                         })
                     });
 
-                    if (!response.ok) {
-                        throw new Error(`Server error: ${response.statusText}`);
-                    }
-
+                    if (!response.ok) throw new Error('Server error: ' + response.statusText);
                     const result = await response.json();
 
                     if (result.plot_data && result.plot_data.length > 0) {
                         const isDarkMode = document.documentElement.classList.contains('dark');
                         const barMode = (chartType === 'bar') ? 'stack' : 'relative';
-                        
                         const layout = {
-                            title: `Spending Trends by ${timeBucket.charAt(0).toUpperCase() + timeBucket.slice(1)}`,
+                            title: 'Spending Trends by ' + timeBucket.charAt(0).toUpperCase() + timeBucket.slice(1),
                             barmode: barMode, 
-                            xaxis: { 
-                                title: 'Date', 
-                                tickformat: '%Y-%m-%d',
-                                rangeslider: { visible: true } 
-                            },
-                            yaxis: { 
-                                title: 'Amount ($)',
-                                tickformat: '$,.0f' 
-                            },
+                            xaxis: { title: 'Date', tickformat: '%Y-%m-%d', rangeslider: { visible: true } },
+                            yaxis: { title: 'Amount ($)', tickformat: '$,.0f' },
                             paper_bgcolor: isDarkMode ? '#1f2937' : '#ffffff', 
                             plot_bgcolor: isDarkMode ? '#1f2937' : '#ffffff',
-                            font: {
-                                color: isDarkMode ? '#d1d5db' : '#111827' 
-                            },
-                            legend: {
-                                orientation: 'h',
-                                y: -0.2,
-                                x: 0.5,
-                                xanchor: 'center'
-                            },
+                            font: { color: isDarkMode ? '#d1d5db' : '#111827' },
+                            legend: { orientation: 'h', y: -0.2, x: 0.5, xanchor: 'center' },
                             margin: { t: 50, b: 150, l: 80, r: 40 },
                             shapes: result.layout_shapes,
                             annotations: result.layout_annotations
                         };
-
                         Plotly.newPlot(chartContainer, result.plot_data, layout, { responsive: true });
                     } else {
                         chartPlaceholder.innerHTML = '<p class="text-xl text-gray-500 dark:text-gray-400">No data found for the selected criteria.</p>';
                         chartPlaceholder.classList.remove('hidden');
                         Plotly.purge(chartContainer); 
                     }
-
                 } catch (error) {
                     console.error('Error fetching chart data:', error);
-                    chartPlaceholder.innerHTML = `<p class="text-xl text-red-500 dark:text-red-400">Error loading chart: ${error.message}</p>`;
+                    chartPlaceholder.innerHTML = '<p class="text-xl text-red-500 dark:text-red-400">Error loading chart: ' + error.message + '</p>';
                     chartPlaceholder.classList.remove('hidden');
                 } finally {
                     loadingSpinner.classList.add('hidden');
+                    loadingSpinner.classList.remove('flex');
                 }
             });
         });

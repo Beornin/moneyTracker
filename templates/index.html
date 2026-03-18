@@ -95,9 +95,25 @@
 
     <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-[98%]">
         
-        <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-2 border-b dark:border-gray-700 pb-2">
-            <i class="fa-solid fa-chart-pie mr-3 text-gray-700 dark:text-gray-300"></i><span class="align-middle">Personal Budget Dashboard</span>
-        </h1>
+        <div class="flex items-center justify-between mb-2 border-b dark:border-gray-700 pb-2">
+            <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white">
+                <i class="fa-solid fa-chart-pie mr-3 text-gray-700 dark:text-gray-300"></i><span class="align-middle">Personal Budget Dashboard</span>
+            </h1>
+            
+            <div class="flex items-center gap-3">
+                <a href="?year={{ current_year - 1 }}{% if view_mode %}&view={{ view_mode }}{% endif %}" 
+                   class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
+                    <i class="fa-solid fa-chevron-left mr-2"></i>{{ current_year - 1 }}
+                </a>
+                <span class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg text-xl">
+                    {{ current_year }}
+                </span>
+                <a href="?year={{ current_year + 1 }}{% if view_mode %}&view={{ view_mode }}{% endif %}" 
+                   class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
+                    {{ current_year + 1 }}<i class="fa-solid fa-chevron-right ml-2"></i>
+                </a>
+            </div>
+        </div>
         
         <div class="mb-6 flex items-center text-sm text-gray-500 dark:text-gray-400">
             <span class="bg-blue-100 text-blue-800 text-xs font-semibold mr-2 px-2.5 py-0.5 rounded dark:bg-blue-200 dark:text-blue-800">
@@ -146,10 +162,6 @@
                     <i class="fa-solid fa-chart-line mr-2"></i>Trends
                 </a>
                 
-                <a href="{{ url_for('monthly_averages') }}" 
-                   class="flex items-center px-4 py-2 border border-green-500 text-green-700 dark:text-green-400 font-semibold rounded-md bg-green-50 dark:bg-green-900 hover:bg-green-100 dark:hover:bg-green-800 transition duration-150">
-                    <i class="fa-solid fa-calculator mr-2"></i>Budget
-                </a>
                 <a href="{{ url_for('categorize') }}" 
                    class="flex items-center px-4 py-2 border border-yellow-500 text-yellow-700 dark:text-yellow-400 font-semibold rounded-md bg-yellow-50 dark:bg-yellow-900 hover:bg-yellow-100 dark:hover:bg-yellow-800 transition duration-150">
                     <i class="fa-solid fa-tags mr-2"></i>Review ({{ summary.uncategorized_count }})
@@ -162,14 +174,13 @@
                    class="flex items-center px-4 py-2 border border-indigo-500 text-indigo-700 dark:text-indigo-400 font-semibold rounded-md bg-indigo-50 dark:bg-indigo-900 hover:bg-indigo-100 dark:hover:bg-indigo-800 transition duration-150">
                     <i class="fa-solid fa-pen-to-square mr-2"></i>Transactions
                 </a>
-                <a href="{{ url_for('manage_payees') }}" 
+                <a href="{{ url_for('manage_entities') }}" 
                    class="flex items-center px-4 py-2 border border-cyan-500 text-cyan-700 dark:text-cyan-400 font-semibold rounded-md bg-cyan-50 dark:bg-cyan-900 hover:bg-cyan-100 dark:hover:bg-cyan-800 transition duration-150">
-                    <i class="fa-solid fa-users mr-2"></i>Payees
+                    <i class="fa-solid fa-building mr-2"></i>Entities
                 </a>
-
-                <a href="{{ url_for('manage_rules') }}" 
-                   class="flex items-center px-4 py-2 border border-slate-500 text-slate-700 dark:text-slate-400 font-semibold rounded-md bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition duration-150">
-                    <i class="fa-solid fa-ruler-combined mr-2"></i>Rules
+                <a href="{{ url_for('budget_page') }}" 
+                   class="flex items-center px-4 py-2 border border-green-500 text-green-700 dark:text-green-400 font-semibold rounded-md bg-green-50 dark:bg-green-900 hover:bg-green-100 dark:hover:bg-green-800 transition duration-150">
+                    <i class="fa-solid fa-wallet mr-2"></i>Budget
                 </a>
                 <a href="{{ url_for('events') }}" class="flex items-center px-4 py-2 text-sm font-medium text-white bg-pink-600 rounded-lg hover:bg-pink-700 transition duration-300 shadow-md">
                     <i class="fa-solid fa-calendar mr-2"></i>Events
@@ -224,6 +235,15 @@
                             <input type="date" name="end_date" id="end_date" 
                                    class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2">
                         </div>
+                    </div>
+
+                    <div class="flex items-center bg-gray-50 dark:bg-gray-700 p-3 rounded-md">
+                        <input type="checkbox" name="csv_has_header" id="csv_has_header" 
+                               class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                        <label for="csv_has_header" class="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                            CSV file has header row
+                            <span class="text-xs text-gray-500 dark:text-gray-400">(Check if first row contains column names)</span>
+                        </label>
                     </div>
 
                     <button type="submit" id="upload-button" class="w-full justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 flex items-center justify-center disabled:opacity-75">
@@ -307,19 +327,37 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Your day-to-day lifestyle view.<br>
-                        <strong>Question Answered:</strong> "Is my daily spending sustainable on my salary?"<br>
-                        <strong>The Math:</strong> Income vs Expenses, but restricted.<br>
-                        <strong>Filtered Out:</strong>
-                        <ul>
-                            <li>• One-off windfalls (like 'Empower IRA' withdrawals).</li>
-                            <li>• Large Fixed Costs: Car Payments, VUL, AC Payments.</li>
-                        </ul>
+                        <strong>What is this?</strong> Your overall financial performance.<br>
+                        <strong>Question Answered:</strong> "Am I earning more than I'm spending?"<br>
+                        <strong>The Math:</strong><br>
+                        <span class="text-green-400">Income:</span> All positive transactions (amount > 0).<br>
+                        <span class="text-blue-400">Expenses:</span> All negative transactions (amount < 0).<br>
+                        <span class="text-yellow-500">Line:</span> Cumulative surplus over time.<br>
+                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' category only.
                     </span>
                 </div>
                 <div id="chart-core-operating" class="w-full h-full"></div>
                 </div>
 
+        </div>
+
+        <div class="w-full mb-8">
+           <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-200 dark:border-blue-900 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>What is this?</strong> Operating performance excluding Investment Transfers.<br>
+                        <strong>Question Answered:</strong> "Am I earning more than I'm spending (excluding investments)?"<br>
+                        <strong>The Math:</strong><br>
+                        <span class="text-green-400">Income:</span> All positive transactions.<br>
+                        <span class="text-blue-400">Expenses:</span> All negative transactions EXCEPT Investment Transfer category.<br>
+                        <span class="text-yellow-500">Line:</span> Cumulative surplus over time.<br>
+                        <strong>Key Difference:</strong> Money transferred to investments is NOT counted as an expense (it's savings!).<br>
+                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' and 'Investment Transfer' categories.
+                    </span>
+                </div>
+                <div id="chart-income-expense" class="w-full h-full"></div>
+            </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -359,8 +397,10 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "How has my utility bill been over the past years?"<br>
-                        <strong>The Math:</strong> Cumulative running total of utilities.<br>
+                        <strong>What is this?</strong> Year-over-year JEA utility comparison.<br>
+                        <strong>Question Answered:</strong> "How does this year's JEA bill compare to past years?"<br>
+                        <strong>The Math:</strong> Monthly JEA expenses for the last 3 years, grouped by month.<br>
+                        <strong>Shows:</strong> Seasonal patterns and year-over-year trends.
                     </span>
                 </div>
                 <div id="chart-yoy-comparison" class="w-full h-full"></div>
@@ -371,10 +411,11 @@
                  <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> A breakdown of the Core Operating chart.<br>
-                        <strong>Question Answered:</strong> "Who is getting my day-to-day spending money?"<br>
-                        <strong>The Math:</strong> Top 20 Payees ranked by total spend.<br>
-                        <strong>Filtered Out:</strong> Same as the graph to the left (No Car, VUL, etc.).
+                        <strong>What is this?</strong> Top expense payees/vendors.<br>
+                        <strong>Question Answered:</strong> "Who are my biggest expense vendors overall?"<br>
+                        <strong>The Math:</strong> Top 20 payees/entities ranked by total expenses.<br>
+                        <strong>Logic:</strong> Groups transactions by entity (e.g., all Publix locations combined).<br>
+                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' category only.
                     </span>
                 </div>
                 <div id="chart-core-summary" class="w-full h-full"></div>
@@ -386,31 +427,14 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Breakdown of Core Expenses by Category.<br>
-                        <strong>Question Answered:</strong> "Which categories are driving my core spending?"<br>
-                        <strong>The Math:</strong> Sum of expenses per category, filtered by Core Logic.<br>
-                        <strong>Filtered Out:</strong> Same as above (No Car, VUL, excluded payees).
+                        <strong>What is this?</strong> Expense breakdown by category over time.<br>
+                        <strong>Question Answered:</strong> "Which categories are consuming my money each period?"<br>
+                        <strong>The Math:</strong> Sum of expenses per category (amount < 0), stacked bars.<br>
+                        <strong>Shows:</strong> Visual breakdown of where money is going by category.<br>
+                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' category only.
                     </span>
                 </div>
                 <div id="chart-core-breakdown" class="w-full h-full"></div>
-            </div>
-        </div>
-
-        <div class="w-full mb-8">
-           <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-200 dark:border-blue-900 h-[600px] relative">
-                <div class="absolute top-4 left-4 z-10 tooltip-container">
-                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
-                    <span class="tooltip-text">
-                        <strong>What is this?</strong> Your budget balance sheet.<br>
-                        <strong>Question Answered:</strong> "Did I earn more than I spent this month?"<br>
-                        <strong>The Math:</strong><br>
-                        <span class="text-green-400">Income:</span> Sum of ALL transactions categorized as 'Income'.<br>
-                        <span class="text-red-400">Expense:</span> Sum of ALL transactions categorized as 'Expense'.<br>
-                        <span class="text-yellow-500">Line:</span> Cumulative Savings (Income - Expense) over time.<br>
-                        <strong>Filtered Out:</strong> ALL Transfers (credit card payments, savings moves) to show true P&L.
-                    </span>
-                </div>
-                <div id="chart-income-expense" class="w-full h-full"></div>
             </div>
         </div>
 
@@ -422,9 +446,13 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-indigo-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "Where exactly is my money going?"<br>
-                        <strong>The Math:</strong> Sum of Net spending per Category.<br>
-                        <strong>Note:</strong> Refunds (Contra-Expenses) reduce the bar height. If you spent $500 but got a $500 refund, the bar is $0.
+                        <strong>What is this?</strong> Savings rate trend over time.<br>
+                        <strong>Question Answered:</strong> "What percentage of my income am I actually saving?"<br>
+                        <strong>The Math:</strong> (Income - Expenses) / Income × 100 per period.<br>
+                        <span class="text-green-400">Green (≥20%):</span> Good savings rate.<br>
+                        <span class="text-yellow-500">Orange (10-19%):</span> Fair savings rate.<br>
+                        <span class="text-red-400">Red (<10%):</span> Needs improvement.<br>
+                        <strong>Benchmark lines:</strong> 20% (Good) and 50% (Excellent).
                     </span>
                 </div>
                 <div id="chart-expense-broad" class="w-full h-full"></div>
@@ -434,9 +462,12 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-purple-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "Who are my biggest vendors overall?"<br>
-                        <strong>The Math:</strong> Total Net Expense per Payee.<br>
-                        <strong>Logic:</strong> Groups raw bank names by your defined Rules (e.g., 'Publix #123' and 'Publix #999' -> 'Publix').
+                        <strong>What is this?</strong> Top income sources for the selected year.<br>
+                        <strong>Question Answered:</strong> "Where does my money come from?"<br>
+                        <strong>The Math:</strong> Total income per entity/source.<br>
+                        <strong>Display:</strong> Top 10 sources, sorted with highest income at bottom (easiest to read).<br>
+                        <strong>Logic:</strong> Groups raw descriptions by entity rules.<br>
+                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' category.
                     </span>
                 </div>
                 <div id="chart-top-expenses" class="w-full h-full"></div>

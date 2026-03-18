@@ -10,7 +10,6 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, extract, case, or_, text
 from sqlalchemy.orm import joinedload
-from sqlalchemy.orm.attributes import flag_modified
 import plotly.graph_objects as go
 from plotly.io import to_json 
 from dotenv import load_dotenv
@@ -32,10 +31,12 @@ DASHBOARD_MONTH_SPAN = 12
 EXCLUDED_CAT = 'Ignored Credit Card Payment'
 
 #For us these categories are from a different pot of money outside this system, so do not use them for core calculations
-EXCLUDED_CAT_CORE = []
+EXCLUDED_CAT_CORE = ['Car Payment', 'VUL', 'AC Payment', 'Taxes']
 
 #For us these specific payees are from a different pot of money outside this system, so do not use them for core calculations
-EXCLUDED_PAYEE_LABELS_CORE = []
+EXCLUDED_PAYEE_LABELS_CORE = ['Planting Oaks', 'Jaxco Furniture','Planting Oaks', 'Jiu Jitsu','Abeka','Christianbook'
+                              ,'New Leaf Publishing','Veritas','Sp Goodandbeautiful Goodandbeauti Ut'
+                              ,'Simplify Health','Fullscript','Kbmo Diagnostics','Rupa Labs']
 
 CHASE_DATE_REGEX = re.compile(r"Opening/Closing Date\s*([\d/]+)\s*-\s*([\d/]+)")
 CHASE_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*)")
@@ -209,32 +210,28 @@ def get_active_budget():
     ).filter_by(is_active=True).first()
 
 def get_budget_core_filters(budget):
-    """Extract sorted line items from budget for core filtering.
-    Returns sorted line items (entity-specific first) or None if no budget.
+    """Extract sets of category_ids and entity_ids from a budget for core filtering.
+    Returns (budgeted_cat_ids, budgeted_entity_ids) or (None, None) if no budget.
     """
     if not budget:
-        return None
-    # Sort: entity-specific items first (more specific), then category-only (more general)
-    line_items = sorted(budget.line_items, key=lambda x: (0 if x.entity_id else 1, x.label))
-    return line_items
+        return None, None
+    cat_ids = set()
+    entity_ids = set()
+    for item in budget.line_items:
+        if item.category_id:
+            cat_ids.add(item.category_id)
+        if item.entity_id:
+            entity_ids.add(item.entity_id)
+    return cat_ids, entity_ids
 
-def is_transaction_budgeted(t, budgeted_line_items):
+def is_transaction_budgeted(t, budgeted_cat_ids, budgeted_entity_ids):
     """Check if a transaction matches any budget line item.
-    Entity-specific items take precedence to prevent double-counting.
-    Uses same matching logic as budget vs actual page.
+    Entity-level items take precedence over category-level.
     """
-    if not budgeted_line_items:
-        return False
-    
-    for li in budgeted_line_items:
-        # If entity is specified, only match by entity
-        if li.entity_id:
-            if t.entity_id == li.entity_id:
-                return True
-        # Otherwise, match by category
-        elif li.category_id and t.category_id == li.category_id:
-            return True
-    
+    if budgeted_entity_ids and t.entity_id in budgeted_entity_ids:
+        return True
+    if budgeted_cat_ids and t.category_id in budgeted_cat_ids:
+        return True
     return False
 
 # --- ENTITY-BASED MATCHING FUNCTIONS ---
@@ -254,6 +251,11 @@ def find_or_create_entity(description, amount, uncat_id):
         if entity.match_patterns:
             for pattern in entity.match_patterns:
                 if pattern.upper() in desc_upper:
+                    # Check match_type constraints
+                    if entity.match_type == 'positive' and amount <= 0:
+                        continue
+                    if entity.match_type == 'negative' and amount >= 0:
+                        continue
                     return entity, entity.category_id
     
     # 2. Try exact name match (for auto-created entities)
@@ -294,46 +296,6 @@ def apply_entity_to_transactions(entity_id, category_id):
     db.session.commit()
     return count
 
-def auto_match_transactions_to_entity(entity):
-    """
-    Auto-match unassigned transactions to this entity based on match patterns.
-    Finds all transactions assigned to auto-created entities and reassigns
-    any that match this entity's patterns.
-    Returns count of reassigned transactions.
-    """
-    if not entity.match_patterns:
-        return 0
-    
-    # Get all auto-created entity IDs (these are "unassigned" transactions)
-    auto_entity_ids = [e.id for e in Entity.query.filter_by(is_auto_created=True).all()]
-    
-    if not auto_entity_ids:
-        return 0
-    
-    # Get all transactions assigned to auto-created entities
-    unassigned_txs = Transaction.query.filter(
-        Transaction.entity_id.in_(auto_entity_ids),
-        Transaction.is_deleted == False
-    ).all()
-    
-    matched_count = 0
-    for tx in unassigned_txs:
-        desc_upper = tx.original_description.upper().strip()
-        
-        # Check if transaction matches any of the entity's patterns
-        for pattern in entity.match_patterns:
-            if pattern.upper() in desc_upper:
-                # Match found - reassign transaction
-                tx.entity_id = entity.id
-                tx.category_id = entity.category_id
-                matched_count += 1
-                break  # Stop checking patterns for this transaction
-    
-    if matched_count > 0:
-        db.session.commit()
-    
-    return matched_count
-
 def rematch_all_entities():
     """Re-run entity matching on all auto-created entities."""
     uncat_id = get_uncategorized_id()
@@ -348,7 +310,6 @@ def rematch_all_entities():
     updated = 0
     for auto_entity in auto_entities:
         name_upper = auto_entity.name.upper()
-        matched = False
         
         # Try to match against rule entities
         for rule_entity in rule_entities:
@@ -364,9 +325,8 @@ def rematch_all_entities():
                         # Delete the auto entity
                         db.session.delete(auto_entity)
                         updated += 1
-                        matched = True
                         break
-                if matched: break
+                if updated: break
     
     db.session.commit()
     return updated
@@ -601,7 +561,7 @@ def get_monthly_summary_direct(month_offset):
 # --- DASHBOARD SERVICE ---
 
 class DashboardService:
-    def __init__(self, view_mode='monthly', year=None):
+    def __init__(self, view_mode='monthly'):
         self.view_mode = view_mode
         
         # 1. Determine Core Anchor Date
@@ -610,7 +570,7 @@ class DashboardService:
         # Example: Checking has Dec 11, CC has Nov 11 -> We use Nov 11.
         # This prevents the dashboard from showing a month where one major account is missing data.
         
-        core_types = ['checking', 'credit_card']
+        core_types = ['checking', 'savings', 'credit_card']
         
         # Get the max statement date for each account type present in the database
         type_max_dates = db.session.query(func.max(StatementRecord.end_date))\
@@ -629,9 +589,6 @@ class DashboardService:
             # Fallback if no statements exist at all
             self.today = date.today()
 
-        # Store the year to display (default to current year from data)
-        self.display_year = year if year else self.today.year
-        
         # 2. Determine HSA Anchor Date (Independent of Core)
         hsa_max_date = db.session.query(func.max(StatementRecord.end_date))\
             .join(Account)\
@@ -668,7 +625,7 @@ class DashboardService:
         
         # Load active budget for core filtering
         self.active_budget = get_active_budget()
-        self.budget_line_items = get_budget_core_filters(self.active_budget)
+        self.budgeted_cat_ids, self.budgeted_entity_ids = get_budget_core_filters(self.active_budget)
         self.has_budget = self.active_budget is not None
         
         self.base_layout = dict(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#71717a'), autosize=True)
@@ -680,8 +637,10 @@ class DashboardService:
         tick_fmt = '%b %Y' if self.view_mode == 'monthly' else '%b %d'
         self.xaxis_date = dict(rangeslider=dict(visible=True), type='date', tickformat=tick_fmt)
         self.xaxis_cat = dict(rangeslider=dict(visible=False), type='category')
-    
+    # [Keep get_summary_for_dashboard unchanged]
     def get_summary_for_dashboard(self, month_offset):
+        # ... [Existing implementation] ...
+        # (This logic is strictly "Current Month" regardless of chart view, so no changes needed)
         idx = self.today.month - 1 + month_offset
         year, month = self.today.year + (idx // 12), (idx % 12) + 1
         start = date(year, month, 1)
@@ -690,10 +649,10 @@ class DashboardService:
         
         txs = [t for t in self.core_transactions if start <= t.date <= end]
         
-        inc = sum(t.amount for t in txs if t.amount > 0 and t.category.name != EXCLUDED_CAT)
-        exp = abs(sum(t.amount for t in txs if t.amount < 0 and t.category.name != EXCLUDED_CAT))
-        s_in = sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount > 0 and t.category.name != EXCLUDED_CAT)
-        s_out = abs(sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount < 0 and t.category.name != EXCLUDED_CAT))
+        inc = sum(t.amount for t in txs if t.category.type == 'Income' and t.category.name != EXCLUDED_CAT)
+        exp = abs(sum(t.amount for t in txs if t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT))
+        s_in = sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount > 0 and (t.category.type in ['Transfer', 'Income']))
+        s_out = abs(sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount < 0 and t.category.type == 'Transfer'))
         net_worth = 0.0
         balances = {}
         
@@ -791,18 +750,25 @@ class DashboardService:
         return to_json(fig, pretty=True)
 
     def generate_all_charts(self):
-        # Show 12 months for the selected year
+        # Calculate time range
+        months_back = DASHBOARD_MONTH_SPAN - 1
+        
         if self.view_mode == 'weekly':
-            # For weekly, cover the full display year (52 weeks)
-            start_date = date(self.display_year, 1, 1)
+            # For weekly, cover roughly the same timeframe (52 weeks ~ 1 year)
+            start_date = self.today - timedelta(weeks=months_back * 4.3)
             # Align to Sunday
             idx = (start_date.weekday() + 1) % 7
             start_date = start_date - timedelta(days=idx)
-            end_date = date(self.display_year, 12, 31)
         else:
-            # For monthly, show Jan 1 to Dec 31 of display_year
-            start_date = date(self.display_year, 1, 1)
-            end_date = date(self.display_year, 12, 31)
+            y_start, m_start = self.today.year, self.today.month - months_back
+            while m_start <= 0: 
+                m_start += 12
+                y_start -= 1
+            start_date = date(y_start, m_start, 1)
+
+        end_date = self.today
+        if self.view_mode == 'monthly':
+            end_date = date(self.today.year, self.today.month, calendar.monthrange(self.today.year, self.today.month)[1])
         
         # Generate buckets
         periods = []
@@ -817,34 +783,18 @@ class DashboardService:
                 
         period_strs = [p.strftime('%Y-%m-%d') for p in periods]
         
-        # Generate monthly periods for charts that should always be monthly
-        monthly_periods = []
-        monthly_start = date(self.display_year, 1, 1)
-        monthly_end = date(self.display_year, 12, 31)
-        curr_month = monthly_start
-        while curr_month <= monthly_end:
-            monthly_periods.append(curr_month)
-            if curr_month.month == 12:
-                curr_month = date(curr_month.year + 1, 1, 1)
-            else:
-                curr_month = date(curr_month.year, curr_month.month + 1, 1)
-        monthly_period_strs = [p.strftime('%Y-%m-%d') for p in monthly_periods]
-        
         # Pre-group transactions
         grouped_core = self._group_transactions(self.core_transactions, start_date, end_date)
-        
-        # Group transactions by month for monthly-only charts
-        grouped_core_monthly = self._group_transactions(self.core_transactions, monthly_start, monthly_end)
         
         shapes, anns = self._get_event_overlays(start_date, end_date)
         
         return {
-            'chart_income_vs_expense': self._chart_income_vs_expense(monthly_periods, monthly_period_strs, grouped_core_monthly, shapes, anns),
+            'chart_income_vs_expense': self._chart_income_vs_expense(periods, period_strs, grouped_core, shapes, anns),
             'chart_savings': self._chart_savings(periods, period_strs, grouped_core, shapes, anns),
             'chart_cash_flow': self._chart_cash_flow(periods, period_strs, grouped_core, shapes, anns),
             'chart_core_operating': self._chart_core_operating(periods, period_strs, grouped_core, shapes, anns),
             'chart_groceries': self._chart_groceries(periods, period_strs, grouped_core, shapes, anns),
-            'chart_expense_broad': self._chart_expense_broad(monthly_periods, monthly_period_strs, grouped_core_monthly, shapes, anns),
+            'chart_expense_broad': self._chart_expense_broad(periods, period_strs, grouped_core, shapes, anns),
             'chart_core_summary': self._chart_core_summary(periods, period_strs, grouped_core, shapes, anns),
             'chart_top_payees': self._chart_top_payees(self.core_transactions, start_date), # Logic differs (aggregate total), pass raw list
             'chart_yoy': self._chart_yoy(), # Explicitly stays Monthly per user request
@@ -854,14 +804,23 @@ class DashboardService:
         }
 
     def _is_core_expense(self, t):
-        """Check if a transaction is a 'core' expense.
-        Returns True for all expenses."""
-        return t.amount < 0 and t.category.name != EXCLUDED_CAT
+        """Check if a transaction is a 'core' expense based on active budget.
+        If no budget exists, falls back to the old hardcoded exclusion lists."""
+        if t.category.type != 'Expense':
+            return False
+        if self.has_budget:
+            return is_transaction_budgeted(t, self.budgeted_cat_ids, self.budgeted_entity_ids)
+        # Fallback: old hardcoded exclusions
+        return (t.category.name not in EXCLUDED_CAT_CORE and
+                t.entity.name not in EXCLUDED_PAYEE_LABELS_CORE)
 
     def _is_core_income(self, t):
-        """Check if a transaction is 'core' income.
-        Returns True for all income."""
-        return t.amount > 0 and t.category.name != EXCLUDED_CAT
+        """Check if a transaction is 'core' income based on active budget."""
+        if t.category.type != 'Income':
+            return False
+        if self.has_budget:
+            return is_transaction_budgeted(t, self.budgeted_cat_ids, self.budgeted_entity_ids)
+        return t.category.name != 'Empower IRA'
 
     # --- Refactored Chart Methods (Using Grouped Data) ---
 
@@ -903,49 +862,24 @@ class DashboardService:
         return to_json(fig, pretty=True)
 
     def _chart_income_vs_expense(self, periods, period_strs, grouped_txs, shapes, anns):
-        """Operating Performance (excluding Investment Transfers) - Income vs Expenses with cumulative surplus"""
-        regular_inc, investment_withdrawals, c_exp = [], [], []
-        cumulative_surplus = 0.0
-        cumulative_net = []
-        
+        incs, exps = [], []
+        cumulative_savings = 0.0
+        cumulative_data = []
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
-            # Separate income into regular income and investment withdrawals
-            regular_inc_val = float(sum(t.amount for t in p_txs if t.amount > 0 and t.category.name != EXCLUDED_CAT and t.category.name != 'Investment'))
-            invest_withdrawal_val = float(sum(t.amount for t in p_txs if t.amount > 0 and t.category.name == 'Investment'))
-            
-            total_inc = regular_inc_val + invest_withdrawal_val
-            
-            # Expenses: all negative amounts except excluded categories AND Investment Transfer
-            # Investment transfers to investments are savings, not expenses
-            exp_val = float(abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.name != EXCLUDED_CAT and t.category.name != 'Investment')))
-            
-            current_surplus = total_inc - exp_val
-            cumulative_surplus += current_surplus
-            regular_inc.append(regular_inc_val)
-            investment_withdrawals.append(invest_withdrawal_val)
-            c_exp.append(exp_val)
-            cumulative_net.append(cumulative_surplus)
-        
+            p_txs = [t for t in p_txs if t.category.name != EXCLUDED_CAT]
+            curr_inc = sum(t.amount for t in p_txs if t.category.type == 'Income')
+            curr_exp = sum(t.amount for t in p_txs if t.category.type == 'Expense')
+            incs.append(float(curr_inc))
+            exps.append(float(abs(curr_exp)))
+            monthly_net = float(curr_inc) - float(abs(curr_exp))
+            cumulative_savings += monthly_net
+            cumulative_data.append(cumulative_savings)
         fig = go.Figure()
-        # Investment withdrawals in red (bad - pulling money out of investments) - leftmost to avoid gaps
-        fig.add_trace(go.Bar(name='Investment Withdrawals', x=period_strs, y=investment_withdrawals, marker_color='#ef4444'))
-        # Regular income in green
-        fig.add_trace(go.Bar(name='Regular Income', x=period_strs, y=regular_inc, marker_color='#10b981'))
-        fig.add_trace(go.Bar(name='Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
-        fig.add_trace(go.Scatter(name='Cumulative Surplus', x=period_strs, y=cumulative_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
-        fig.update_layout(
-            title='Operating Performance (Excl. Investment Transfers)', 
-            barmode='group', 
-            yaxis=dict(title='$', tickformat="$,.0f"), 
-            xaxis=self.xaxis_date, 
-            showlegend=True, 
-            legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), 
-            margin=self.margin_legend, 
-            shapes=shapes, 
-            annotations=anns, 
-            **self.base_layout
-        )
+        fig.add_trace(go.Bar(name='Income', x=period_strs, y=incs, marker_color='#22c55e'))
+        fig.add_trace(go.Bar(name='Expense', x=period_strs, y=exps, marker_color='#ef4444'))
+        fig.add_trace(go.Scatter(name='Cumulative Savings', x=period_strs, y=cumulative_data, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.update_layout(title='Income vs Expenses (Budget View)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=dict(t=60, b=100, l=50, r=10), **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_savings(self, periods, period_strs, grouped_txs, shapes, anns):
@@ -953,8 +887,8 @@ class DashboardService:
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
             p_txs = [t for t in p_txs if t.account_id in self.savings_account_ids and t.category.name != EXCLUDED_CAT]
-            in_val = float(sum(t.amount for t in p_txs if t.amount > 0))
-            out_val = float(abs(sum(t.amount for t in p_txs if t.amount < 0)))
+            in_val = float(sum(t.amount for t in p_txs if t.amount > 0 and t.category.type in ['Transfer', 'Income']))
+            out_val = float(abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.type == 'Transfer')))
             net = in_val - out_val
             net_vals.append(net)
             colors.append('#10b981' if net >= 0 else '#ef4444')
@@ -968,8 +902,8 @@ class DashboardService:
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
             p_txs = [t for t in p_txs if t.category.name != EXCLUDED_CAT]
-            inc = float(sum(t.amount for t in p_txs if t.amount > 0))
-            exp = float(abs(sum(t.amount for t in p_txs if t.amount < 0)))
+            inc = float(sum(t.amount for t in p_txs if t.category.type == 'Income'))
+            exp = float(abs(sum(t.amount for t in p_txs if t.category.type == 'Expense')))
             net = inc - exp
             net_vals.append(net)
             colors.append('#10b981' if net >= 0 else '#ef4444')
@@ -1032,22 +966,19 @@ class DashboardService:
         return to_json(fig, pretty=True)
 
     def _chart_top_payees(self, txs, start_date):
-        income_map = {}
+        payee_map = {}
         for t in txs:
             name = t.entity.name
             if (t.date >= start_date and
                 t.category.name != EXCLUDED_CAT and
-                t.amount > 0):  # Income transactions only
-                income_map[name] = income_map.get(name, 0.0) + float(t.amount)
-        
-        # Sort by highest income (descending), limit to 10, then reverse for chart (lowest at top)
-        sorted_sources = sorted(income_map.items(), key=lambda item: item[1], reverse=True)[:10]
-        sorted_sources = sorted_sources[::-1]  # Reverse so lowest appears at top, highest at bottom
-        names = [p[0] for p in sorted_sources]
-        vals = [p[1] for p in sorted_sources]
-        
-        fig = go.Figure(data=[go.Bar(x=vals, y=names, orientation='h', marker_color='#10b981', text=vals, texttemplate='$%{x:,.0f}', hovertemplate='%{y}<br>$%{x:,.2f}<extra></extra>')])
-        fig.update_layout(title='Top 10 Income Sources (Current View)', xaxis=dict(title='Total Income', tickformat="$,.0f"), margin=self.margin_std, **self.base_layout)
+                self._is_core_expense(t)):
+                payee_map[name] = payee_map.get(name, 0.0) + float(t.amount)
+        sorted_payees = sorted(payee_map.items(), key=lambda item: item[1])[:20]
+        sorted_payees = sorted_payees[::-1]
+        names = [p[0] for p in sorted_payees]
+        vals = [abs(p[1]) for p in sorted_payees]
+        fig = go.Figure(data=[go.Bar(x=vals, y=names, orientation='h', marker_color='#6366f1', text=vals, texttemplate='$%{x:,.0f}', hovertemplate='%{y}<br>$%{x:,.2f}<extra></extra>')])
+        fig.update_layout(title='Top 20 Core Operating Payees (Current View)', xaxis=dict(title='Total Spent', tickformat="$,.0f"), margin=self.margin_std, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_yoy(self):
@@ -1059,7 +990,7 @@ class DashboardService:
             monthly_totals = {}
             for t in yr_txs:
                 p_name = t.entity.name
-                if 'JEA' in p_name.upper() and t.amount < 0:
+                if 'JEA' in p_name.upper() and t.category.type == 'Expense':
                     m = t.date.month
                     monthly_totals[m] = monthly_totals.get(m, 0.0) + float(t.amount)
             y_vals = []
@@ -1069,78 +1000,29 @@ class DashboardService:
                     y_vals.append(None)
                 else:
                     y_vals.append(abs(val))
-            fig.add_trace(go.Bar(name=str(yr), x=list(calendar.month_name[1:]), y=y_vals, marker_color=colors[i], text=y_vals, texttemplate='$%{y:,.0f}', hovertemplate='%{y}<br>$%{x:,.2f}<extra></extra>'))
+            fig.add_trace(go.Bar(name=str(yr), x=list(calendar.month_name[1:]), y=y_vals, marker_color=colors[i], text=y_vals, texttemplate='$%{y:,.0f}', textposition='auto'))
         fig.update_layout(title='YoY JEA Expenses (3-Year Comparison)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_cat, margin=self.margin_std, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_expense_broad(self, periods, period_strs, grouped_txs, shapes, anns):
-        """Savings Rate Trend - shows percentage of income saved each period"""
-        savings_rates = []
-        colors = []
-        hover_texts = []
-        
+        cat_data = {}
+        all_cats = set()
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
-            p_txs = [t for t in p_txs if t.category.name != EXCLUDED_CAT]
-            
-            total_income = sum(t.amount for t in p_txs if t.amount > 0)
-            # Exclude Investment category - transfers to investments are savings, not expenses
-            total_expenses = abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.name != 'Investment'))
-            net_savings = total_income - total_expenses
-            
-            if total_income > 0:
-                savings_rate = (net_savings / total_income) * 100
-            else:
-                savings_rate = 0
-            
-            savings_rates.append(savings_rate)
-            colors.append('#10b981' if savings_rate >= 20 else '#f59e0b' if savings_rate >= 10 else '#ef4444')
-            hover_texts.append(f"Rate: {savings_rate:.1f}%<br>Income: ${total_income:,.0f}<br>Expenses: ${total_expenses:,.0f}<br>Saved: ${net_savings:,.0f}")
-        
+            p_txs = [t for t in p_txs if t.category.type == 'Expense' and t.category.name != EXCLUDED_CAT]
+            if p_str not in cat_data: cat_data[p_str] = {}
+            temp_cat_totals = {}
+            for t in p_txs:
+                c_name = t.category.name
+                all_cats.add(c_name)
+                temp_cat_totals[c_name] = temp_cat_totals.get(c_name, 0.0) + float(t.amount)
+            for c, val in temp_cat_totals.items():
+                cat_data[p_str][c] = abs(val) if val < 0 else 0.0
         fig = go.Figure()
-        
-        # Add savings rate bars
-        fig.add_trace(go.Bar(
-            x=period_strs, 
-            y=savings_rates, 
-            marker_color=colors,
-            text=[f"{rate:.1f}%" for rate in savings_rates],
-            textposition='auto',
-            hoverinfo='text',
-            hovertext=hover_texts,
-            name='Savings Rate'
-        ))
-        
-        # Add benchmark lines
-        fig.add_trace(go.Scatter(
-            x=period_strs, 
-            y=[20]*len(period_strs), 
-            mode='lines',
-            line=dict(color='#10b981', width=2, dash='dash'),
-            name='Good (20%)',
-            opacity=0.5
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=period_strs, 
-            y=[50]*len(period_strs), 
-            mode='lines',
-            line=dict(color='#6366f1', width=2, dash='dash'),
-            name='Excellent (50%)',
-            opacity=0.5
-        ))
-        
-        fig.update_layout(
-            title='Savings Rate Trend',
-            yaxis=dict(title='Savings Rate (%)', tickformat=".0f", range=[min(0, min(savings_rates) - 5) if savings_rates else 0, max(60, max(savings_rates) + 5) if savings_rates else 60]),
-            xaxis=self.xaxis_date,
-            shapes=shapes,
-            annotations=anns,
-            margin=self.margin_events,
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
-            **self.base_layout
-        )
+        for cat in sorted(list(all_cats), reverse=True):
+            y_vals = [cat_data.get(m, {}).get(cat, 0) for m in period_strs]
+            fig.add_trace(go.Bar(name=cat, x=period_strs, y=y_vals))
+        fig.update_layout(title='Expenses by Category (Net)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, legend=dict(traceorder='reversed'), **self.base_layout)
         return to_json(fig, pretty=True)
 
 # --- AI INSIGHTS LOGIC ---
@@ -1159,13 +1041,9 @@ def get_spending_data_for_period(start, end):
     spending_by_cat = {}
     total_income = 0
     for t in transactions:
-        # Skip excluded category
-        if t.category.name == EXCLUDED_CAT:
-            continue
-            
-        if t.amount < 0:
+        if t.category.type == 'Expense':
             spending_by_cat[t.category.name] = spending_by_cat.get(t.category.name, 0) + abs(float(t.amount))
-        elif t.amount > 0:
+        elif t.category.type == 'Income':
             total_income += float(t.amount)
     for c, v in spending_by_cat.items(): spending_by_cat[c] = round(v, 2)
     total_expense = sum(spending_by_cat.values())
@@ -1234,14 +1112,13 @@ def index(month_offset):
     try: month_offset = int(month_offset)
     except: return redirect(url_for('index'))
     
-    view_mode = request.args.get('view', 'monthly')
-    year = request.args.get('year', type=int)
+    view_mode = request.args.get('view', 'monthly') # Get view param
     
-    service = DashboardService(view_mode=view_mode, year=year)
+    service = DashboardService(view_mode=view_mode)
     summary = service.get_summary_for_dashboard(month_offset)
     charts = service.generate_all_charts()
     
-    return render_template('index.html', month_offset=month_offset, summary=summary, accounts=Account.query.all(), gemini_api_key=os.getenv('GEMINI_API_KEY'), view_mode=view_mode, current_year=service.display_year, **charts)
+    return render_template('index.html', month_offset=month_offset, summary=summary, accounts=Account.query.all(), gemini_api_key=os.getenv('GEMINI_API_KEY'), view_mode=view_mode, **charts)
 
 @app.route('/upload_file', methods=['POST'])
 def upload_file():
@@ -1381,12 +1258,6 @@ def manage_entities():
             # Update existing entity
             entity = db.session.get(Entity, int(entity_id))
             if entity and name:
-                # Check if renaming to a name that already exists on a different entity
-                existing_entity = Entity.query.filter_by(name=name).first()
-                if existing_entity and existing_entity.id != entity.id:
-                    flash(f"Cannot rename to '{name}' - an entity with that name already exists.", "danger")
-                    return redirect(url_for('manage_entities'))
-                
                 entity.name = name
                 entity.category_id = int(category_id) if category_id else entity.category_id
                 entity.match_type = match_type
@@ -1396,14 +1267,7 @@ def manage_entities():
                 
                 # Apply to all transactions with this entity
                 count = apply_entity_to_transactions(entity.id, entity.category_id)
-                
-                # Auto-match unassigned transactions based on patterns
-                matched_count = auto_match_transactions_to_entity(entity)
-                
-                if matched_count > 0:
-                    flash(f"Updated entity '{name}'. Applied to {count} existing transactions and auto-matched {matched_count} unassigned transactions.", "success")
-                else:
-                    flash(f"Updated entity '{name}'. Applied to {count} transactions.", "success")
+                flash(f"Updated entity '{name}'. Applied to {count} transactions.", "success")
         elif name and category_id:
             # Create new entity
             existing = Entity.query.filter_by(name=name).first()
@@ -1417,14 +1281,7 @@ def manage_entities():
                 )
                 db.session.add(entity)
                 db.session.commit()
-                
-                # Auto-match unassigned transactions based on patterns
-                matched_count = auto_match_transactions_to_entity(entity)
-                
-                if matched_count > 0:
-                    flash(f"Created entity '{name}' and auto-matched {matched_count} unassigned transactions.", "success")
-                else:
-                    flash(f"Created entity '{name}'.", "success")
+                flash(f"Created entity '{name}'.", "success")
             else:
                 flash(f"Entity '{name}' already exists.", "danger")
         
@@ -1452,11 +1309,15 @@ def manage_entities():
     has_next = end < total
     has_prev = start > 0
     
-    cats = Category.query.order_by(Category.name).all()
+    cats = Category.query.order_by(Category.type, Category.name).all()
+    grouped_categories = {}
+    for c in cats:
+        if c.type not in grouped_categories: grouped_categories[c.type] = []
+        grouped_categories[c.type].append(c)
     
     return render_template('manage_entities.html', 
                          entities=entities_paginated, 
-                         categories=cats,
+                         grouped_categories=grouped_categories,
                          search_query=search_query, 
                          page=page, 
                          has_next=has_next, 
@@ -1467,35 +1328,8 @@ def delete_entity(entity_id):
     uncat = get_uncategorized_id()
     entity = db.session.get(Entity, entity_id)
     if entity:
-        # Use bulk update to reassign transactions to uncategorized + auto-entities
-        transactions = Transaction.query.filter_by(entity_id=entity_id).all()
-        
-        # Create auto-entities for unique descriptions
-        for t in transactions:
-            desc = t.original_description if t.original_description else f"Transaction {t.id}"
-            auto_entity = Entity.query.filter_by(name=desc).first()
-            if not auto_entity:
-                auto_entity = Entity(
-                    name=desc,
-                    category_id=uncat,
-                    is_auto_created=True,
-                    match_patterns=[]
-                )
-                db.session.add(auto_entity)
-        
-        db.session.commit()  # Commit all new entities
-        
-        # Update transactions using bulk update for each unique description
-        for t in transactions:
-            desc = t.original_description if t.original_description else f"Transaction {t.id}"
-            auto_entity = Entity.query.filter_by(name=desc).first()
-            if not auto_entity:
-                raise Exception(f"Failed to find/create auto-entity '{desc}' for transaction {t.id}")
-            Transaction.query.filter_by(id=t.id).update(
-                {'entity_id': auto_entity.id, 'category_id': uncat},
-                synchronize_session=False
-            )
-        
+        # Update all transactions to uncategorized
+        Transaction.query.filter_by(entity_id=entity_id).update({'category_id': uncat})
         db.session.delete(entity)
         db.session.commit()
         flash(f"Deleted entity '{entity.name}'.", "success")
@@ -1509,45 +1343,6 @@ def apply_entity_patterns(entity_id):
         flash(f"Applied patterns for '{entity.name}' to {count} transactions.", "success")
     return redirect(url_for('manage_entities'))
 
-@app.route('/api/sync_entity_categories', methods=['POST'])
-def sync_entity_categories():
-    """Sync entity categories to match their transactions' most common category"""
-    try:
-        entities = Entity.query.all()
-        synced = 0
-        skipped = 0
-        details = []
-        
-        for entity in entities:
-            # Get most common category from this entity's transactions
-            result = db.session.query(
-                Transaction.category_id,
-                func.count(Transaction.id).label('count')
-            ).filter(
-                Transaction.entity_id == entity.id,
-                Transaction.is_deleted == False
-            ).group_by(Transaction.category_id).order_by(func.count(Transaction.id).desc()).first()
-            
-            if result:
-                if result.category_id != entity.category_id:
-                    old_cat = Category.query.get(entity.category_id).name if entity.category_id else "None"
-                    new_cat = Category.query.get(result.category_id).name if result.category_id else "None"
-                    entity.category_id = result.category_id
-                    synced += 1
-                    details.append(f"{entity.name}: {old_cat} → {new_cat}")
-            else:
-                # No transactions for this entity
-                skipped += 1
-        
-        db.session.commit()
-        msg = f'Synced {synced} entities, skipped {skipped} with no transactions.'
-        if details and len(details) <= 10:
-            msg += f'\n\nUpdated:\n' + '\n'.join(details[:10])
-        return jsonify({'success': True, 'message': msg})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
-
 @app.route('/api/rematch_all_entities', methods=['POST'])
 def api_rematch_all_entities():
     try:
@@ -1555,29 +1350,6 @@ def api_rematch_all_entities():
         flash(f'Re-matched {total} transactions.', 'success')
         return jsonify({'success': True, 'message': f'Re-matched {total} transactions.'})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/delete_orphaned_entities', methods=['POST'])
-def delete_orphaned_entities():
-    """Delete entities that have no transactions"""
-    try:
-        entities = Entity.query.all()
-        deleted = []
-        
-        for entity in entities:
-            tx_count = Transaction.query.filter_by(entity_id=entity.id, is_deleted=False).count()
-            if tx_count == 0:
-                deleted.append(entity.name)
-                db.session.delete(entity)
-        
-        db.session.commit()
-        count = len(deleted)
-        msg = f'Deleted {count} orphaned entities with no transactions.'
-        if deleted and len(deleted) <= 10:
-            msg += f'\n\nDeleted:\n' + '\n'.join(deleted[:10])
-        return jsonify({'success': True, 'message': msg})
-    except Exception as e:
-        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/statement_history')
@@ -1653,35 +1425,35 @@ def categorize():
                         db.session.commit()
                         flash("Updated single transaction.", "success")
                     elif frag and disp:
+                        # Determine match type based on transaction amount
+                        m_type = 'any'
+                        if t.amount < 0: m_type = 'negative'
+                        elif t.amount > 0: m_type = 'positive'
+
                         # Find or create entity with this display name
                         entity = Entity.query.filter_by(name=disp).first()
                         
-                        # Normalize pattern to uppercase for consistent matching
-                        frag_upper = frag.strip().upper()
-                        
                         if entity:
                             # Update existing entity
-                            existing_patterns = entity.match_patterns or []
-                            if frag_upper not in existing_patterns:
-                                existing_patterns.append(frag_upper)
-                                entity.match_patterns = existing_patterns
-                                # Mark the JSON field as modified so SQLAlchemy detects the change
-                                flag_modified(entity, 'match_patterns')
+                            if frag not in entity.match_patterns:
+                                patterns = entity.match_patterns or []
+                                patterns.append(frag)
+                                entity.match_patterns = patterns
                             entity.category_id = cat_id
-                            entity.match_type = 'any'
+                            entity.match_type = m_type
                             entity.is_auto_created = False
-                            flash_msg = f"Updated entity '{disp}'."
+                            flash_msg = f"Updated entity '{disp}' ({m_type})."
                         else:
                             # Create new entity
                             entity = Entity(
                                 name=disp,
                                 category_id=cat_id,
-                                match_type='any',
-                                match_patterns=[frag_upper],
+                                match_type=m_type,
+                                match_patterns=[frag],
                                 is_auto_created=False
                             )
                             db.session.add(entity)
-                            flash_msg = f"Created entity '{disp}'."
+                            flash_msg = f"Created entity '{disp}' ({m_type})."
                         
                         db.session.commit()
                         
@@ -1691,16 +1463,8 @@ def categorize():
                         
                         # Apply to all matching transactions
                         count = apply_entity_to_transactions(entity.id, cat_id)
-                        
-                        # Auto-match unassigned transactions based on patterns
-                        matched_count = auto_match_transactions_to_entity(entity)
-                        
                         db.session.commit()
-                        
-                        if matched_count > 0:
-                            flash(f"{flash_msg} Applied to {count} transactions and auto-matched {matched_count} unassigned transactions.", "success")
-                        else:
-                            flash(f"{flash_msg} Applied to {count} transactions.", "success")
+                        flash(f"{flash_msg} Applied to {count} transactions.", "success")
             except ValueError: flash("Invalid Category ID.", "danger")
             except Exception as e: db.session.rollback(); flash(f"Error: {e}", "danger")
         else: flash("Missing required fields.", "danger")
@@ -1722,15 +1486,15 @@ def categorize():
     if month and month != 'all': q = q.filter(extract('month', Transaction.date) == int(month))
     if srch: q = q.filter(or_(Entity.name.ilike(f"%{srch}%"), Transaction.original_description.ilike(f"%{srch}%")))
     txs = q.order_by(Transaction.date.desc()).limit(500 if (srch or year or month) else 50).all()
-    cats = Category.query.order_by(Category.name).all()
+    cats = Category.query.order_by(Category.type, Category.name).all()
+    grouped = {}
+    for c in cats:
+        if c.type not in grouped: grouped[c.type] = []
+        grouped[c.type].append(c)
     labels = [r.name for r in db.session.query(Entity.name).distinct().order_by(Entity.name).all()]
     available_years = [int(y[0]) for y in db.session.query(extract('year', Transaction.date)).distinct().order_by(extract('year', Transaction.date).desc()).all()]
     month_choices = [(str(i), calendar.month_name[i]) for i in range(1, 13)]
-    
-    # Build entity-to-category mapping for auto-selection
-    entity_category_map = {e.name: e.category_id for e in Entity.query.all()}
-    
-    return render_template('categorize.html', transactions=txs, categories=cats, filter_type=filt, search_query=srch, selected_year=year, selected_month=month, available_years=available_years, existing_labels=labels, month_choices=month_choices, entity_category_map=entity_category_map)
+    return render_template('categorize.html', transactions=txs, grouped_categories=grouped, filter_type=filt, search_query=srch, selected_year=year, selected_month=month, available_years=available_years, existing_labels=labels, month_choices=month_choices)
 
 @app.route('/edit_transactions', defaults={'month_offset': '0'}, methods=['GET','POST'])
 @app.route('/edit_transactions/<string:month_offset>', methods=['GET','POST'])
@@ -1777,13 +1541,21 @@ def edit_transactions(month_offset):
     txs = query.all()
     available_years = [int(y[0]) for y in db.session.query(extract('year', Transaction.date)).distinct().order_by(extract('year', Transaction.date).desc()).all()]
     month_choices = [(str(i), calendar.month_name[i]) for i in range(1, 13)]
-    cats = Category.query.order_by(Category.name).all()
+    cats = Category.query.order_by(Category.type, Category.name).all()
+    grouped = {}
+    for c in cats:
+        if c.type not in grouped: grouped[c.type] = []
+        grouped[c.type].append(c)
         
-    return render_template('edit_transactions.html', transactions=txs, entities=Entity.query.order_by(Entity.name).all(), categories=cats, accounts=Account.query.all(), month_offset=month_offset, current_month_name=current_context, search_query=srch, available_years=available_years, month_choices=month_choices, selected_year=request.args.get('year'), selected_month=request.args.get('month'), sort_by=sort_by, sort_order=sort_order)
+    return render_template('edit_transactions.html', transactions=txs, entities=Entity.query.order_by(Entity.name).all(), grouped_categories=grouped, accounts=Account.query.all(), month_offset=month_offset, current_month_name=current_context, search_query=srch, available_years=available_years, month_choices=month_choices, selected_year=request.args.get('year'), selected_month=request.args.get('month'), sort_by=sort_by, sort_order=sort_order)
 
 @app.route('/monthly_averages')
 def monthly_averages():
-    cats = Category.query.order_by(Category.name).all()
+    cats = Category.query.order_by(Category.type, Category.name).all()
+    grouped_categories = {}
+    for c in cats:
+        if c.type not in grouped_categories: grouped_categories[c.type] = []
+        grouped_categories[c.type].append(c)
     
     accounts = Account.query.order_by(Account.name).all()
     
@@ -1804,7 +1576,7 @@ def monthly_averages():
     
     budgets = Budget.query.order_by(Budget.name).all()
     
-    return render_template('monthly_averages.html', categories=cats, payee_labels=unique_labels, accounts=accounts, budgets=budgets, category_payees=payee_map)
+    return render_template('monthly_averages.html', grouped_categories=grouped_categories, payee_labels=unique_labels, accounts=accounts, budgets=budgets, category_payees=payee_map)
 
 @app.route('/api/average_data', methods=['POST'])
 def get_average_data():
@@ -1992,10 +1764,14 @@ def delete_budget(budget_id):
 def budget_page():
     plans = BudgetPlan.query.order_by(BudgetPlan.name).all()
     active_plan = BudgetPlan.query.filter_by(is_active=True).first()
-    cats = Category.query.order_by(Category.name).all()
+    cats = Category.query.order_by(Category.type, Category.name).all()
+    grouped_categories = {}
+    for c in cats:
+        if c.type not in grouped_categories: grouped_categories[c.type] = []
+        grouped_categories[c.type].append(c)
     entities = Entity.query.order_by(Entity.name).all()
     return render_template('budget.html', plans=plans, active_plan=active_plan,
-                           categories=cats,
+                           categories=cats, grouped_categories=grouped_categories,
                            entities=entities)
 
 @app.route('/api/budget_plan', methods=['POST'])
@@ -2010,16 +1786,6 @@ def api_create_budget_plan():
     db.session.add(plan)
     db.session.commit()
     return jsonify({'success': True, 'id': plan.id})
-
-@app.route('/trends')
-def trends():
-    cats = Category.query.order_by(Category.name).all()
-    entities = Entity.query.order_by(Entity.name).all()
-    return render_template('trends.html', 
-                         categories=cats, 
-                         entities=entities,
-                         excluded_core=EXCLUDED_CAT_CORE,
-                         excluded_cat=EXCLUDED_CAT)
 
 @app.route('/api/budget_plan/<int:plan_id>/activate', methods=['POST'])
 def api_activate_budget_plan(plan_id):
@@ -2134,22 +1900,22 @@ def api_populate_from_averages(plan_id):
     
     # Get average spending per category
     rows = db.session.query(
-        Category.id, Category.name,
+        Category.id, Category.name, Category.type,
         func.sum(Transaction.amount), func.count(func.distinct(func.date_trunc('month', Transaction.date)))
     ).join(Category).filter(
         Transaction.date >= start,
         Transaction.date <= cutoff,
         Transaction.is_deleted == False
-    ).group_by(Category.id, Category.name).all()
+    ).group_by(Category.id, Category.name, Category.type).all()
     
     count = 0
-    for cat_id, cat_name, total, month_count in rows:
-        if cat_name == 'Uncategorized' or cat_name == EXCLUDED_CAT:
+    for cat_id, cat_name, cat_type, total, month_count in rows:
+        if cat_type == 'Transfers' or cat_name == 'Uncategorized':
             continue
         avg = abs(float(total)) / max(int(month_count), 1)
         if avg < 1:
             continue
-        item_type = 'income' if total > 0 else 'expense'
+        item_type = 'income' if cat_type == 'Income' else 'expense'
         existing = BudgetLineItem.query.filter_by(budget_id=plan_id, category_id=cat_id).first()
         if not existing:
             item = BudgetLineItem(budget_id=plan_id, label=cat_name, item_type=item_type,
@@ -2352,7 +2118,7 @@ def api_budget_vs_actual():
     # Unbudgeted transactions (only for current month)
     unbudgeted = []
     for t in all_txs:
-        if t.date >= month_start and t.date <= month_end and t.id not in matched_tx_ids and t.category.name != EXCLUDED_CAT:
+        if t.date >= month_start and t.date <= month_end and t.id not in matched_tx_ids and t.category.type != 'Transfers':
             unbudgeted.append({
                 'date': t.date.strftime('%Y-%m-%d'),
                 'entity': t.entity.name,
@@ -2415,20 +2181,7 @@ def manage_categories():
             db.session.add(Category(name=n, type=t))
             db.session.commit()
         return redirect(url_for('manage_categories'))
-    
-    # Get transaction count for each category
-    tx_counts = dict(db.session.query(
-        Transaction.category_id,
-        func.count(Transaction.id)
-    ).filter(Transaction.is_deleted == False).group_by(Transaction.category_id).all())
-    
-    categories = Category.query.order_by(Category.name).all()
-    
-    # Add transaction count to each category object
-    for cat in categories:
-        cat.transaction_count = tx_counts.get(cat.id, 0)
-    
-    return render_template('manage_categories.html', categories=categories)
+    return render_template('manage_categories.html', categories=Category.query.order_by(Category.type, Category.name).all())
 
 @app.route('/manage_categories/delete/<int:cat_id>', methods=['POST'])
 def delete_category(cat_id):
@@ -2469,12 +2222,34 @@ def delete_event(eid):
     db.session.commit()
     return redirect(url_for('events'))
 
+@app.route('/trends')
+def trends():
+    cats = Category.query.order_by(Category.type, Category.name).all()
+    grouped_categories = {}
+    for c in cats:
+        if c.type not in grouped_categories: grouped_categories[c.type] = []
+        grouped_categories[c.type].append(c)
+    
+    accounts = Account.query.order_by(Account.name).all()
+    
+    # Get unique entity names for filter dropdown
+    results = db.session.query(Entity.name).distinct().order_by(Entity.name).all()
+    unique_labels = [r.name for r in results if r.name]
+    
+    # CHANGED: Added EXCLUDED_CAT_CORE and EXCLUDED_CAT to the context
+    return render_template('trends.html', 
+                           grouped_categories=grouped_categories, 
+                           all_events=Event.query.all(), 
+                           payee_labels=unique_labels, 
+                           accounts=accounts,
+                           excluded_core=EXCLUDED_CAT_CORE,
+                           excluded_cat=EXCLUDED_CAT)
+
 @app.route('/api/trend_data', methods=['POST'])
 def get_trend_data():
     data = request.get_json()
     cat_ids = data.get('category_ids', [])
     payee_names = data.get('payee_names', [])
-    acct_ids = [int(i) for i in data.get('account_ids', [])]
     evt_ids = [int(i) for i in data.get('event_ids', [])]
     
     # FIX: Retrieve account_ids from request
@@ -2617,8 +2392,7 @@ def api_spending_velocity():
                 Transaction.date >= start,
                 Transaction.date <= end,
                 Transaction.is_deleted == False,
-                Transaction.amount < 0,
-                Category.name != EXCLUDED_CAT
+                Category.type == 'Expense'
             )
             if acct_ids:
                 query = query.filter(Transaction.account_id.in_(acct_ids))

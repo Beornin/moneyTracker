@@ -142,7 +142,7 @@
                             <span class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 truncate">{{ tx.account.name }} ({{ tx.account.account_type.replace('_',' ').title() }})</span>
                         </div>
                         
-                        <p class="text-lg font-bold text-gray-800 dark:text-gray-100 truncate pr-2" title="{{ tx.payee.name }}">{{ tx.payee.name }}</p>
+                        <p class="text-lg font-bold text-gray-800 dark:text-gray-100 truncate pr-2" title="{{ tx.entity.name }}">{{ tx.entity.name }}</p>
                         
                         <p class="text-2xl font-extrabold 
                             {% if tx.amount < 0 %} text-red-600 dark:text-red-400
@@ -162,10 +162,10 @@
 
                         <div class="grid grid-cols-2 gap-2 mb-2">
                             <div>
-                                <label class="block text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Payee Label</label>
+                                <label class="block text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Entity Name</label>
                                 <input type="text"  autocomplete="off" 
                                     name="payee_display_name" 
-                                    value="{{ tx.payee.display_name or tx.payee.name }}"
+                                    value="{{ tx.entity.name }}"
                                     required 
                                     list="existing_labels"
                                     class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
@@ -174,7 +174,7 @@
                                 <label class="block text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Match Text</label>
                                 <input type="text"  autocomplete="off" 
                                     name="rule_fragment" 
-                                    value="{{ tx.payee.name }}"
+                                    value="{{ tx.entity.name }}"
                                     required 
                                     class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
                             </div>
@@ -183,14 +183,10 @@
                         <div class="flex gap-2">
                             <select name="category_id" required class="flex-grow px-2 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500">
                                 <option value="">Select Category...</option>
-                                {% for group_name, categories in grouped_categories.items() %}
-                                    <optgroup label="{{ group_name }}" class="text-gray-900 dark:text-gray-300 font-bold bg-gray-100 dark:bg-gray-900">
-                                        {% for cat in categories %}
-                                            <option value="{{ cat.id }}" class="text-gray-900 dark:text-white bg-white dark:bg-gray-800" {% if cat.id == tx.category_id %}selected{% endif %}>
-                                                {{ cat.name }}
-                                            </option>
-                                        {% endfor %}
-                                    </optgroup>
+                                {% for cat in categories %}
+                                    <option value="{{ cat.id }}" class="text-gray-900 dark:text-white bg-white dark:bg-gray-800" {% if cat.id == tx.category_id %}selected{% endif %}>
+                                        {{ cat.name }}
+                                    </option>
                                 {% endfor %}
                             </select>
 
@@ -225,6 +221,40 @@
 
     </div>
     <script>
+        // Entity to category mapping from backend
+        const entityCategoryMap = {{ entity_category_map | tojson }};
+        
+        // Auto-select category when entity name changes
+        document.addEventListener('DOMContentLoaded', () => {
+            const entityInputs = document.querySelectorAll('input[name="payee_display_name"]');
+            
+            entityInputs.forEach(input => {
+                input.addEventListener('input', (e) => {
+                    const entityName = e.target.value.trim();
+                    const form = e.target.closest('form');
+                    const categorySelect = form.querySelector('select[name="category_id"]');
+                    
+                    if (entityName && entityCategoryMap[entityName]) {
+                        const categoryId = entityCategoryMap[entityName];
+                        categorySelect.value = categoryId;
+                    }
+                });
+                
+                // Also trigger on blur to catch datalist selections
+                input.addEventListener('blur', (e) => {
+                    const entityName = e.target.value.trim();
+                    const form = e.target.closest('form');
+                    const categorySelect = form.querySelector('select[name="category_id"]');
+                    
+                    if (entityName && entityCategoryMap[entityName]) {
+                        const categoryId = entityCategoryMap[entityName];
+                        categorySelect.value = categoryId;
+                    }
+                });
+            });
+        });
+        
+        // Flash message auto-hide
         setTimeout(() => {
             const flashContainer = document.getElementById('flash-container');
             if (flashContainer) {

@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Budget Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'class' }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+    <style>
+        .modal-bg { display:none; position:fixed; z-index:50; inset:0; background:rgba(0,0,0,0.5); }
+        .modal-bg.show { display:flex; align-items:center; justify-content:center; }
+        .status-green { color: #16a34a; }
+        .status-yellow { color: #ca8a04; }
+        .status-red { color: #dc2626; }
+        .status-neutral { color: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-7xl">
+        
+        <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white mb-2 border-b dark:border-gray-700 pb-2">
+            <i class="fa-solid fa-wallet mr-3 text-green-600 dark:text-green-400"></i><span class="align-middle">Budget Planner</span>
+        </h1>
+        <p class="text-gray-500 dark:text-gray-400 mb-6">Define expected monthly income &amp; expenses. The active budget drives dashboard "core" charts and outlier detection.</p>
+
+        <div class="flex justify-between items-center mb-6">
+            <a href="{{ url_for('index', month_offset=0) }}" class="flex items-center text-sm font-medium px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
+                <i class="fa-solid fa-arrow-left mr-2"></i>Back to Dashboard
+            </a>
+        </div>
+
+        <!-- Plan Selector -->
+        <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md mb-6 border border-gray-200 dark:border-gray-700">
+            <div class="flex flex-wrap gap-4 items-end">
+                <div class="flex-grow min-w-[200px]">
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Budget Plans</label>
+                    <select id="plan-select" onchange="selectPlan(this.value)" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white p-2 text-sm">
+                        <option value="">-- Select a Plan --</option>
+                        {% for p in plans %}
+                        <option value="{{ p.id }}" {% if active_plan and p.id == active_plan.id %}selected{% endif %}>
+                            {{ p.name }}{% if p.is_active %} ★ Active{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button onclick="showCreatePlanModal()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md">
+                    <i class="fa-solid fa-plus mr-1"></i>New Plan
+                </button>
+                <button onclick="activatePlan()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md">
+                    <i class="fa-solid fa-star mr-1"></i>Set Active
+                </button>
+                <button onclick="deletePlan()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md">
+                    <i class="fa-solid fa-trash mr-1"></i>Delete
+                </button>
+            </div>
+        </div>
+
+        <!-- Bulk Actions -->
+        <div id="bulk-actions" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md mb-6 border border-gray-200 dark:border-gray-700 {% if not active_plan %}hidden{% endif %}">
+            <div class="flex flex-wrap gap-2">
+                <button onclick="showAddItemModal()" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-md">
+                    <i class="fa-solid fa-plus mr-1"></i>Add Line Item
+                </button>
+                <button onclick="showPopulateModal()" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md">
+                    <i class="fa-solid fa-magic mr-1"></i>Populate from Averages
+                </button>
+                <button onclick="showImportModal()" class="px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded-md">
+                    <i class="fa-solid fa-file-import mr-1"></i>Import CSV
+                </button>
+            </div>
+        </div>
+
+        <!-- Budget vs Actual (current month) -->
+        <div id="bva-section" class="mb-6 {% if not active_plan %}hidden{% endif %}">
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-gray-900 dark:text-white">
+                        <i class="fa-solid fa-chart-bar mr-2 text-indigo-500"></i>Budget vs Actual
+                    </h2>
+                    <div class="flex items-center gap-2">
+                        <button onclick="changeBvaMonth(-1)" class="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600"><i class="fa-solid fa-chevron-left"></i></button>
+                        <span id="bva-month-label" class="text-sm font-medium text-gray-700 dark:text-gray-300 min-w-[120px] text-center"></span>
+                        <button onclick="changeBvaMonth(1)" class="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600"><i class="fa-solid fa-chevron-right"></i></button>
+                    </div>
+                </div>
+                
+                <!-- Summary Cards -->
+                <div id="bva-summary" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4"></div>
+                
+                <!-- Progress Bar -->
+                <div class="mb-4">
+                    <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        <span>Month Progress</span>
+                        <span id="bva-progress-label"></span>
+                    </div>
+                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <div id="bva-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all" style="width:0%"></div>
+                    </div>
+                </div>
+
+                <!-- Items Table -->
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                        <thead class="bg-gray-50 dark:bg-gray-700">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Item</th>
+                                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Expected</th>
+                                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actual</th>
+                                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Variance</th>
+                                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Projected</th>
+                                <th class="px-3 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bva-items" class="divide-y divide-gray-200 dark:divide-gray-700"></tbody>
+                    </table>
+                </div>
+
+                <!-- Unbudgeted -->
+                <div id="unbudgeted-section" class="mt-4 hidden">
+                    <h3 class="text-sm font-bold text-red-600 dark:text-red-400 mb-2">
+                        <i class="fa-solid fa-triangle-exclamation mr-1"></i>Unbudgeted Transactions
+                    </h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                            <thead class="bg-red-50 dark:bg-red-900/30">
+                                <tr>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-red-600 dark:text-red-400 uppercase">Date</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-red-600 dark:text-red-400 uppercase">Entity</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-red-600 dark:text-red-400 uppercase">Category</th>
+                                    <th class="px-3 py-2 text-right text-xs font-medium text-red-600 dark:text-red-400 uppercase">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="unbudgeted-items" class="divide-y divide-gray-200 dark:divide-gray-700"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Line Items Table -->
+        <div id="items-section" class="{% if not active_plan %}hidden{% endif %}">
+            <div class="bg-white dark:bg-gray-800 shadow-xl overflow-hidden rounded-lg">
+                <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                    <h2 class="text-lg font-bold text-gray-900 dark:text-white">
+                        <i class="fa-solid fa-list-check mr-2 text-green-500"></i>Line Items
+                    </h2>
+                    <div class="flex gap-4 text-sm">
+                        <span class="text-green-600 dark:text-green-400 font-medium">Income: $<span id="total-income">0</span>/mo</span>
+                        <span class="text-red-600 dark:text-red-400 font-medium">Expenses: $<span id="total-expense">0</span>/mo</span>
+                        <span class="text-indigo-600 dark:text-indigo-400 font-bold">Surplus: $<span id="total-surplus">0</span>/mo</span>
+                    </div>
+                </div>
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead class="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Label</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Type</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Linked To</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Expected $/mo</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Notes</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="line-items-body" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Plan Modal -->
+    <div id="createPlanModal" class="modal-bg">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Create Budget Plan</h3>
+            <input type="text" id="new-plan-name" placeholder="e.g. 2025 Family Budget" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2 mb-4">
+            <div class="flex gap-2 justify-end">
+                <button onclick="document.getElementById('createPlanModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md">Cancel</button>
+                <button onclick="createPlan()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Item Modal -->
+    <div id="addItemModal" class="modal-bg">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-lg w-full mx-4">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4" id="item-modal-title">Add Line Item</h3>
+            <input type="hidden" id="edit-item-id" value="">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Label</label>
+                    <input type="text" id="item-label" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+                    <select id="item-type" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
+                        <option value="expense">Expense</option>
+                        <option value="income">Income</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Link to Category (optional)</label>
+                    <select id="item-category" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
+                        <option value="">-- None --</option>
+                        {% for cat in categories %}
+                            <option value="{{ cat.id }}">{{ cat.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Link to Entity (optional)</label>
+                    <select id="item-entity" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
+                        <option value="">-- None --</option>
+                        {% for e in entities %}
+                        <option value="{{ e.id }}">{{ e.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Expected Amount ($)</label>
+                    <input type="number" id="item-amount" step="0.01" min="0" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Frequency</label>
+                    <select id="item-frequency" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly (÷3 for monthly avg)</option>
+                        <option value="annual">Annual (÷12 for monthly avg)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
+                    <input type="text" id="item-notes" placeholder="e.g. covered by HSA" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
+                </div>
+            </div>
+            <div class="flex gap-2 justify-end mt-6">
+                <button onclick="document.getElementById('addItemModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md">Cancel</button>
+                <button onclick="saveItem()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import CSV Modal -->
+    <div id="importModal" class="modal-bg">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-lg w-full mx-4">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Import from CSV</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Paste CSV with columns: <code>label, type (category|entity), amount, notes</code></p>
+            <textarea id="csv-input" rows="10" placeholder="Groceries, category, 800&#10;JEA, entity, 250&#10;Salary, category, 5000, primary income" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2 text-sm font-mono"></textarea>
+            <div class="flex gap-2 justify-end mt-4">
+                <button onclick="document.getElementById('importModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md">Cancel</button>
+                <button onclick="importCsv()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md">Import</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Populate Modal -->
+    <div id="populateModal" class="modal-bg">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Populate from Averages</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Auto-generate line items from your actual spending averages. Existing items won't be duplicated.</p>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Months to average</label>
+                <select id="populate-months" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2">
+                    <option value="3">3 months</option>
+                    <option value="6" selected>6 months</option>
+                    <option value="12">12 months</option>
+                </select>
+            </div>
+            <div class="flex gap-2 justify-end">
+                <button onclick="document.getElementById('populateModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md">Cancel</button>
+                <button onclick="populateFromAverages()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md">Populate</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPlanId = {{ active_plan.id if active_plan else 'null' }};
+        let bvaYear = new Date().getFullYear();
+        let bvaMonth = new Date().getMonth() + 1;
+
+        function fmt(n) { return Number(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+        function showCreatePlanModal() { document.getElementById('createPlanModal').classList.add('show'); }
+        function showImportModal() { document.getElementById('importModal').classList.add('show'); }
+        function showPopulateModal() { document.getElementById('populateModal').classList.add('show'); }
+
+        function showAddItemModal(editData) {
+            document.getElementById('edit-item-id').value = editData ? editData.id : '';
+            document.getElementById('item-modal-title').textContent = editData ? 'Edit Line Item' : 'Add Line Item';
+            document.getElementById('item-label').value = editData ? editData.label : '';
+            document.getElementById('item-type').value = editData ? editData.item_type : 'expense';
+            document.getElementById('item-category').value = editData ? (editData.category_id || '') : '';
+            document.getElementById('item-entity').value = editData ? (editData.entity_id || '') : '';
+            document.getElementById('item-amount').value = editData ? editData.expected_amount : '';
+            document.getElementById('item-frequency').value = editData ? (editData.frequency || 'monthly') : 'monthly';
+            document.getElementById('item-notes').value = editData ? (editData.notes || '') : '';
+            document.getElementById('addItemModal').classList.add('show');
+        }
+
+        async function createPlan() {
+            const name = document.getElementById('new-plan-name').value.trim();
+            if (!name) return alert('Name required');
+            const r = await fetch('/api/budget_plan', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name})});
+            const d = await r.json();
+            if (d.success) { location.reload(); } else { alert(d.message); }
+        }
+
+        function selectPlan(planId) {
+            if (!planId) return;
+            currentPlanId = parseInt(planId);
+            loadItems();
+            document.getElementById('bulk-actions').classList.remove('hidden');
+            document.getElementById('items-section').classList.remove('hidden');
+            document.getElementById('bva-section').classList.remove('hidden');
+            loadBva();
+        }
+
+        async function activatePlan() {
+            if (!currentPlanId) return alert('Select a plan first');
+            const r = await fetch(`/api/budget_plan/${currentPlanId}/activate`, {method:'POST'});
+            const d = await r.json();
+            alert(d.message);
+            location.reload();
+        }
+
+        async function deletePlan() {
+            if (!currentPlanId) return alert('Select a plan first');
+            if (!confirm('Delete this budget plan and all its line items?')) return;
+            await fetch(`/api/budget_plan/${currentPlanId}/delete`, {method:'POST'});
+            location.reload();
+        }
+
+        async function loadItems() {
+            if (!currentPlanId) return;
+            const r = await fetch(`/api/budget_plan/${currentPlanId}/items`);
+            const d = await r.json();
+            renderItems(d.items);
+        }
+
+        function renderItems(items) {
+            const tbody = document.getElementById('line-items-body');
+            let totalInc = 0, totalExp = 0;
+            
+            tbody.innerHTML = items.map(i => {
+                const freq = i.frequency || 'monthly';
+                // Normalize to monthly equivalent for totals
+                let monthlyAmount = i.expected_amount;
+                if (freq === 'annual') monthlyAmount = i.expected_amount / 12;
+                else if (freq === 'quarterly') monthlyAmount = i.expected_amount / 3;
+                
+                if (i.item_type === 'income') totalInc += monthlyAmount;
+                else totalExp += monthlyAmount;
+                
+                const linked = i.entity_name ? `<span class="text-blue-600 dark:text-blue-400"><i class="fa-solid fa-building mr-1"></i>${i.entity_name}</span>` :
+                               i.category_name ? `<span class="text-purple-600 dark:text-purple-400"><i class="fa-solid fa-tag mr-1"></i>${i.category_name}</span>` :
+                               '<span class="text-gray-400">—</span>';
+                
+                const typeColor = i.item_type === 'income' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+                const freqLabel = freq === 'annual' ? '/yr' : freq === 'quarterly' ? '/qtr' : '/mo';
+                
+                return `<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">${i.label}</td>
+                    <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-medium ${typeColor}">${i.item_type}</span></td>
+                    <td class="px-4 py-3 text-sm">${linked}</td>
+                    <td class="px-4 py-3 text-sm text-right font-mono font-medium text-gray-900 dark:text-white">$${fmt(i.expected_amount)}<span class="text-xs text-gray-500 ml-1">${freqLabel}</span></td>
+                    <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">${i.notes || ''}</td>
+                    <td class="px-4 py-3 text-right text-sm">
+                        <button onclick='showAddItemModal(${JSON.stringify(i)})' class="text-blue-600 hover:text-blue-900 dark:text-blue-400 mr-2"><i class="fa-solid fa-edit"></i></button>
+                        <button onclick="deleteItem(${i.id})" class="text-red-600 hover:text-red-900 dark:text-red-400"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            document.getElementById('total-income').textContent = fmt(totalInc);
+            document.getElementById('total-expense').textContent = fmt(totalExp);
+            document.getElementById('total-surplus').textContent = fmt(totalInc - totalExp);
+        }
+
+        async function saveItem() {
+            const editId = document.getElementById('edit-item-id').value;
+            const payload = {
+                budget_id: currentPlanId,
+                label: document.getElementById('item-label').value.trim(),
+                item_type: document.getElementById('item-type').value,
+                category_id: document.getElementById('item-category').value || null,
+                entity_id: document.getElementById('item-entity').value || null,
+                expected_amount: parseFloat(document.getElementById('item-amount').value) || 0,
+                frequency: document.getElementById('item-frequency').value,
+                notes: document.getElementById('item-notes').value.trim()
+            };
+            
+            let r;
+            if (editId) {
+                r = await fetch(`/api/budget_item/${editId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+            } else {
+                r = await fetch('/api/budget_item', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+            }
+            const d = await r.json();
+            if (d.success) {
+                document.getElementById('addItemModal').classList.remove('show');
+                loadItems();
+                loadBva();
+            } else { alert(d.message); }
+        }
+
+        async function deleteItem(itemId) {
+            if (!confirm('Delete this line item?')) return;
+            await fetch(`/api/budget_item/${itemId}`, {method:'DELETE'});
+            loadItems();
+            loadBva();
+        }
+
+        async function importCsv() {
+            const csv = document.getElementById('csv-input').value;
+            const r = await fetch(`/api/budget_plan/${currentPlanId}/import_csv`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({csv_text: csv})});
+            const d = await r.json();
+            alert(d.message);
+            document.getElementById('importModal').classList.remove('show');
+            loadItems();
+        }
+
+        async function populateFromAverages() {
+            const months = document.getElementById('populate-months').value;
+            const r = await fetch(`/api/budget_plan/${currentPlanId}/populate_from_averages`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({months: parseInt(months)})});
+            const d = await r.json();
+            alert(d.message);
+            document.getElementById('populateModal').classList.remove('show');
+            loadItems();
+        }
+
+        // Budget vs Actual
+        function changeBvaMonth(delta) {
+            bvaMonth += delta;
+            if (bvaMonth > 12) { bvaMonth = 1; bvaYear++; }
+            if (bvaMonth < 1) { bvaMonth = 12; bvaYear--; }
+            loadBva();
+        }
+
+        async function loadBva() {
+            if (!currentPlanId) return;
+            const r = await fetch(`/api/budget_vs_actual?year=${bvaYear}&month=${bvaMonth}`);
+            const d = await r.json();
+            if (!d.success) return;
+            
+            document.getElementById('bva-month-label').textContent = `${d.month_name} ${d.year}`;
+            document.getElementById('bva-progress-bar').style.width = d.pct_elapsed + '%';
+            document.getElementById('bva-progress-label').textContent = `${d.days_elapsed}/${d.days_in_month} days (${d.pct_elapsed}%)`;
+            
+            // Summary cards
+            const t = d.totals;
+            document.getElementById('bva-summary').innerHTML = `
+                <div class="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800">
+                    <div class="text-xs text-green-600 dark:text-green-400 font-medium">Income</div>
+                    <div class="text-lg font-bold text-green-700 dark:text-green-300">$${fmt(t.actual_income)}</div>
+                    <div class="text-xs text-gray-500">of $${fmt(t.expected_income)}</div>
+                </div>
+                <div class="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800">
+                    <div class="text-xs text-red-600 dark:text-red-400 font-medium">Expenses</div>
+                    <div class="text-lg font-bold text-red-700 dark:text-red-300">$${fmt(t.actual_expense)}</div>
+                    <div class="text-xs text-gray-500">of $${fmt(t.expected_expense)}</div>
+                </div>
+                <div class="p-3 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800">
+                    <div class="text-xs text-indigo-600 dark:text-indigo-400 font-medium">Surplus</div>
+                    <div class="text-lg font-bold text-indigo-700 dark:text-indigo-300">$${fmt(t.actual_surplus)}</div>
+                    <div class="text-xs text-gray-500">expected $${fmt(t.expected_surplus)}</div>
+                </div>
+                <div class="p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800">
+                    <div class="text-xs text-yellow-600 dark:text-yellow-400 font-medium">Unbudgeted</div>
+                    <div class="text-lg font-bold text-yellow-700 dark:text-yellow-300">${d.unbudgeted.length}</div>
+                    <div class="text-xs text-gray-500">transactions</div>
+                </div>`;
+            
+            // Items
+            const tbody = document.getElementById('bva-items');
+            tbody.innerHTML = d.items.map(i => {
+                const icon = i.status === 'green' ? 'fa-circle-check text-green-500' : 
+                             i.status === 'yellow' ? 'fa-triangle-exclamation text-yellow-500' : 
+                             i.status === 'red' ? 'fa-circle-xmark text-red-500' : 'fa-circle text-gray-400';
+                // Income: positive variance = green (good), negative = red (bad)
+                // Expense: positive variance = red (bad), negative = green (good)
+                const varColor = i.item_type === 'income' 
+                    ? (i.variance >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')
+                    : (i.variance <= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400');
+                return `<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td class="px-3 py-2 text-gray-900 dark:text-white">${i.label}${i.notes ? ` <span class="text-xs text-gray-400">(${i.notes})</span>` : ''}</td>
+                    <td class="px-3 py-2 text-right font-mono">$${fmt(i.expected)}</td>
+                    <td class="px-3 py-2 text-right font-mono font-medium">$${fmt(i.actual)}</td>
+                    <td class="px-3 py-2 text-right font-mono ${varColor}">${i.variance >= 0 ? '+' : ''}$${fmt(i.variance)} (${i.pct_variance}%)</td>
+                    <td class="px-3 py-2 text-right font-mono text-gray-500">$${fmt(i.projected)}</td>
+                    <td class="px-3 py-2 text-center"><i class="fa-solid ${icon}"></i></td>
+                </tr>`;
+            }).join('');
+            
+            // Unbudgeted
+            const ubSection = document.getElementById('unbudgeted-section');
+            const ubBody = document.getElementById('unbudgeted-items');
+            if (d.unbudgeted.length > 0) {
+                ubSection.classList.remove('hidden');
+                ubBody.innerHTML = d.unbudgeted.map(u => `<tr class="hover:bg-red-50 dark:hover:bg-red-900/20">
+                    <td class="px-3 py-2 text-gray-700 dark:text-gray-300">${u.date}</td>
+                    <td class="px-3 py-2 font-medium text-gray-900 dark:text-white">${u.entity}</td>
+                    <td class="px-3 py-2 text-gray-600 dark:text-gray-400">${u.category}</td>
+                    <td class="px-3 py-2 text-right font-mono font-medium ${u.amount < 0 ? 'text-red-600' : 'text-green-600'}">$${fmt(Math.abs(u.amount))}</td>
+                </tr>`).join('');
+            } else {
+                ubSection.classList.add('hidden');
+            }
+        }
+
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+            if (currentPlanId) {
+                loadItems();
+                loadBva();
+            }
+        });
+    </script>
+</body>
+</html>
