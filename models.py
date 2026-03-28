@@ -12,21 +12,23 @@ class TimestampMixin(object):
 class Account(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False)
-    account_type = db.Column(db.String(50), nullable=False) 
+    account_type = db.Column(db.String(50), nullable=False)
     transactions = db.relationship('Transaction', backref='account', lazy=True, cascade="all, delete-orphan")
     __table_args__ = (db.UniqueConstraint('name', 'account_type', name='_account_uc'),)
-    
+
 class StatementRecord(db.Model, TimestampMixin):
     """Tracks uploaded PDF statement periods to prevent duplicates."""
     id = db.Column(db.Integer, primary_key=True)
     account_id = db.Column(db.Integer, db.ForeignKey('account.id'), nullable=False)
     start_date = db.Column(db.Date, nullable=False, index=True)
-    end_date = db.Column(db.Date, nullable=False)
-    
+    end_date = db.Column(db.Date, nullable=False, index=True)
+
     account = db.relationship('Account', backref='statement_records', lazy=True)
 
     __table_args__ = (
         db.UniqueConstraint('account_id', 'start_date', 'end_date', name='_statement_period_uc'),
+        # Composite for dashboard max(end_date) queries filtered by account
+        db.Index('idx_sr_account_end', 'account_id', 'end_date'),
     )
 
 class Category(db.Model, TimestampMixin):
@@ -46,7 +48,7 @@ class Entity(db.Model, TimestampMixin):
     is_auto_created = db.Column(db.Boolean, default=False, nullable=False, index=True)
     notes = db.Column(db.Text, nullable=True)
     transactions = db.relationship('Transaction', backref='entity', lazy=True)
-    
+
     __table_args__ = (
         db.Index('idx_entity_category', 'category_id'),
     )
@@ -54,25 +56,33 @@ class Entity(db.Model, TimestampMixin):
 class Transaction(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.Date, nullable=False)
-    original_description = db.Column(db.String(500), nullable=True) 
+    original_description = db.Column(db.String(500), nullable=True)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     entity_id = db.Column(db.Integer, db.ForeignKey('entity.id'), nullable=False)
     category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=False)
     account_id = db.Column(db.Integer, db.ForeignKey('account.id'), nullable=False)
     is_deleted = db.Column(db.Boolean, default=False, nullable=False)
-    
+
     __table_args__ = (
         db.Index('idx_tx_date_deleted', 'date', 'is_deleted'),
         db.Index('idx_tx_category', 'category_id'),
         db.Index('idx_tx_account', 'account_id'),
         db.Index('idx_tx_entity', 'entity_id'),
+        db.Index('idx_tx_account_date_amount', 'account_id', 'date', 'amount'),
     )
 
 class Event(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.Date, nullable=False)
+    date = db.Column(db.Date, nullable=False, index=True)
     description = db.Column(db.String(500), nullable=False)
     __table_args__ = (db.UniqueConstraint('date', 'description', name='_event_uc'),)
+
+class Budget(db.Model, TimestampMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    start_date = db.Column(db.Date, nullable=True)
+    end_date = db.Column(db.Date, nullable=True)
+    criteria = db.Column(db.Text, nullable=False)
 
 class BudgetPlan(db.Model, TimestampMixin):
     """A named budget plan containing expected monthly amounts."""
@@ -106,7 +116,7 @@ def create_tables():
     if Category.query.count() == 0:
         uncat = Category(name='Uncategorized', type='Expense')
         db.session.add(uncat)
-        db.session.commit() 
+        db.session.commit()
         initial_cats = [
             {'name': 'Salary', 'type': 'Income'}, {'name': 'Empower IRA', 'type': 'Income'}, {'name': 'Rental', 'type': 'Income'}, {'name': 'Venmo', 'type': 'Income'}, {'name': 'Checks', 'type': 'Income'}, {'name': 'Investment Income', 'type': 'Income'}, {'name': 'Reimbursements', 'type': 'Income'}, {'name': 'Other Income', 'type': 'Income'},
             {'name': 'Housing', 'type': 'Expense'}, {'name': 'Pets', 'type': 'Expense'}, {'name': 'Car Payment', 'type': 'Expense'}, {'name': 'Utilities', 'type': 'Expense'}, {'name': 'Groceries', 'type': 'Expense'}, {'name': 'Transportation', 'type': 'Expense'}, {'name': 'Insurance', 'type': 'Expense'}, {'name': 'Medical', 'type': 'Expense'}, {'name': 'Education', 'type': 'Expense'},
@@ -124,26 +134,23 @@ def get_active_budget():
     ).filter_by(is_active=True).first()
 
 def get_budget_core_filters(budget):
-    """Extract sets of category_ids and entity_ids from a budget for core filtering.
-    Returns (budgeted_cat_ids, budgeted_entity_ids) or (None, None) if no budget.
+    """Extract sorted line items from budget for core filtering.
+    Returns sorted line items (entity-specific first) or None if no budget.
     """
     if not budget:
-        return None, None
-    cat_ids = set()
-    entity_ids = set()
-    for item in budget.line_items:
-        if item.category_id:
-            cat_ids.add(item.category_id)
-        if item.entity_id:
-            entity_ids.add(item.entity_id)
-    return cat_ids, entity_ids
+        return None
+    return sorted(budget.line_items, key=lambda x: (0 if x.entity_id else 1, x.label))
 
-def is_transaction_budgeted(t, budgeted_cat_ids, budgeted_entity_ids):
+def is_transaction_budgeted(t, budgeted_line_items):
     """Check if a transaction matches any budget line item.
-    Entity-level items take precedence over category-level.
+    Entity-specific items take precedence to prevent double-counting.
     """
-    if budgeted_entity_ids and t.entity_id in budgeted_entity_ids:
-        return True
-    if budgeted_cat_ids and t.category_id in budgeted_cat_ids:
-        return True
+    if not budgeted_line_items:
+        return False
+    for li in budgeted_line_items:
+        if li.entity_id:
+            if t.entity_id == li.entity_id:
+                return True
+        elif li.category_id and t.category_id == li.category_id:
+            return True
     return False

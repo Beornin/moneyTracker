@@ -1,7 +1,11 @@
+# DEPRECATED: This seed script uses the old Payee/PayeeRule schema which was replaced
+# by the unified Entity model. Use seed_data_entity.py instead.
+# seed_database() will NOT work until rewritten for the Entity schema.
 import random
 from datetime import date, timedelta
 import json
-from app import app, db, Account, Category, Payee, PayeeRule, Transaction, Event, Budget, StatementRecord
+from app import app
+from models import db, Account, Category, Transaction, Event, Budget, StatementRecord
 
 def get_date_range(start_date, end_date):
     """Generator for iterating through dates."""

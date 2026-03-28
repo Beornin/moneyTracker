@@ -276,6 +276,7 @@
                             <option value="savings">Savings</option>
                             <option value="credit_card">Credit Card</option>
                             <option value="hsa">HSA</option>
+                            <option value="brokerage">Brokerage</option>
                         </select>
                     </div>
                     <button type="submit" class="w-full justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 flex items-center justify-center">
@@ -488,6 +489,19 @@
             </div>
         </div>
 
+        <div class="w-full mb-8">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-green-300 dark:border-green-800 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-chart-line text-gray-400 hover:text-green-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>What is this?</strong> Interest and dividends earned from the Fidelity brokerage account (CDs, SPAXX, ETFs).<br>
+                        <strong>Note:</strong> Stacked by symbol. Fully excluded from all core and wealth charts.
+                    </span>
+                </div>
+                <div id="chart-brokerage-income" class="w-full h-full"></div>
+            </div>
+        </div>
+
         <script>
             
             function renderChart(plotData, divId) {
@@ -524,6 +538,7 @@
                 const plot10 = {{ chart_core_breakdown|safe if chart_core_breakdown else 'null' }};
                 const plot11 = {{ chart_hsa_activity|safe if chart_hsa_activity else 'null' }}; // NEW CHART
                 const plot12 = {{ chart_eat_out_patterns|safe if chart_eat_out_patterns else 'null' }};
+                const plot13 = {{ chart_brokerage_income|safe if chart_brokerage_income else 'null' }};
 
                 renderChart(plot1, 'chart-income-expense');
                 renderChart(plot4, 'chart-core-operating');
@@ -535,6 +550,7 @@
                 renderChart(plot5, 'chart-groceries');
                 renderChart(plot11, 'chart-hsa-activity');
                 renderChart(plot12, 'chart-eat-out-patterns');
+                renderChart(plot13, 'chart-brokerage-income');
             }
 
             var themeToggleBtn = document.getElementById('theme-toggle');

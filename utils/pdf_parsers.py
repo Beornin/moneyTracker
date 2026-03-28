@@ -1,8 +1,10 @@
 import re
-from datetime import datetime, date
+import csv
+import io
 import pdfplumber
+from datetime import datetime, date
+from utils.helpers import try_parse_date
 
-# Regular expressions for parsing
 CHASE_DATE_REGEX = re.compile(r"Opening/Closing Date\s*([\d/]+)\s*-\s*([\d/]+)")
 CHASE_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*)")
 HSA_PERIOD_REGEX = re.compile(r"Period\s*:?\s*(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4})\s*through\s*(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4})", re.IGNORECASE)
@@ -16,22 +18,112 @@ WF_END_BAL_REGEX = re.compile(r"Ending balance on (\d{1,2}/\d{1,2})")
 WF_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*?)\s+([\d,]+\.\d{2})")
 WF_TEXT_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*)")
 
-def try_parse_date(date_str):
-    if not date_str: return None
-    date_str = date_str.strip()
-    
-    try:
-        return datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        pass
 
-    clean_date_str = date_str.replace('.', '/').replace('-', '/')
-    for fmt in ('%m/%d/%y', '%m/%d/%Y'):
-        try:
-            return datetime.strptime(clean_date_str, fmt).date()
-        except ValueError:
-            continue
-    return None
+def parse_fidelity_csv(file_stream):
+    """
+    Parses a Fidelity brokerage CSV export.
+    Returns (transactions_list, min_date, max_date) importing:
+    - INTEREST and DIVIDEND RECEIVED rows as direct income.
+    - REDEMPTION PAYOUT rows for zero-coupon treasuries as discount income
+      (redemption amount minus original purchase price).
+    """
+    INCOME_PREFIXES = ('INTEREST', 'DIVIDEND RECEIVED')
+    TREASURY_KEYWORDS = ('TREAS', 'UNITED STATES', 'ZERO CPN')
+
+    try:
+        text = file_stream.read().decode('utf-8', errors='replace')
+        lines = text.splitlines()
+
+        header_idx = None
+        for i, line in enumerate(lines):
+            if 'Run Date' in line and 'Action' in line:
+                header_idx = i
+                break
+
+        if header_idx is None:
+            return None, None, None
+
+        data_text = '\n'.join(lines[header_idx:])
+        all_rows = list(csv.DictReader(io.StringIO(data_text)))
+
+        # Pass 1: record purchase price for zero-coupon treasury buys keyed by CUSIP
+        treasury_purchase = {}
+        for row in all_rows:
+            action = (row.get('Action') or '').strip().upper()
+            if not action.startswith('YOU BOUGHT'):
+                continue
+            desc_upper = (row.get('Description') or '').upper()
+            if not any(kw in desc_upper for kw in TREASURY_KEYWORDS):
+                continue
+            symbol = (row.get('Symbol') or '').strip()
+            if not symbol:
+                continue
+            raw_amt = (row.get('Amount') or '').strip()
+            try:
+                amt = float(raw_amt.replace(',', ''))
+            except ValueError:
+                continue
+            if amt < 0:
+                treasury_purchase[symbol] = abs(amt)
+
+        # Pass 2: collect income transactions
+        transactions = []
+        dates = []
+
+        for row in all_rows:
+            action = (row.get('Action') or '').strip()
+            action_upper = action.upper()
+            symbol = (row.get('Symbol') or '').strip()
+            description = (row.get('Description') or '').strip()
+
+            is_direct_income = any(action_upper.startswith(p) for p in INCOME_PREFIXES)
+            is_treasury_redemption = (
+                action_upper.startswith('REDEMPTION PAYOUT') and
+                symbol in treasury_purchase
+            )
+
+            if not (is_direct_income or is_treasury_redemption):
+                continue
+
+            raw_amt = (row.get('Amount') or '').strip()
+            if not raw_amt:
+                continue
+            try:
+                redemption_amt = float(raw_amt.replace(',', ''))
+            except ValueError:
+                continue
+
+            if is_treasury_redemption:
+                amount = redemption_amt - treasury_purchase[symbol]
+                if amount <= 0:
+                    continue
+            else:
+                amount = redemption_amt
+                if amount <= 0:
+                    continue
+
+            raw_date = (row.get('Run Date') or '').strip()
+            try:
+                tx_date = datetime.strptime(raw_date, '%m/%d/%Y').date()
+            except ValueError:
+                continue
+
+            if symbol and len(symbol) <= 5 and symbol.isalpha():
+                entity_name = symbol
+            else:
+                entity_name = description[:40].strip()
+
+            transactions.append({'Date': tx_date, 'Description': entity_name, 'Amount': amount})
+            dates.append(tx_date)
+
+        if not dates:
+            return None, None, None
+
+        return transactions, min(dates), max(dates)
+    except Exception as e:
+        print(f"Fidelity CSV Parse Error: {e}")
+        return None, None, None
+
 
 def parse_chase_pdf(file_stream):
     """

@@ -1,19 +1,20 @@
-import os
+﻿import os
 import calendar
-import re
 import io
 import json
-from datetime import datetime, date, timedelta 
-import pdfplumber 
 import pandas as pd
+from datetime import datetime, date, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, extract, case, or_, text
+from sqlalchemy import func, extract, case, or_, text, exists
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.attributes import flag_modified
-import plotly.graph_objects as go
-from plotly.io import to_json 
 from dotenv import load_dotenv
+
+from constants import DASHBOARD_MONTH_SPAN, EXCLUDED_CAT, EXCLUDED_CAT_CORE, EXCLUDED_PAYEE_LABELS_CORE
+from models import db, Account, StatementRecord, Category, Entity, Transaction, Event, Budget, BudgetPlan, BudgetLineItem, create_tables
+from utils.helpers import get_uncategorized_id, try_parse_date, find_or_create_entity, update_entity_patterns, apply_entity_to_transactions, auto_match_transactions_to_entity, rematch_all_entities, get_monthly_summary_direct
+from utils.pdf_parsers import parse_chase_pdf, parse_wellsfargo_pdf, parse_hsa_pdf, parse_fidelity_csv
+from services.dashboard import DashboardService
 
 load_dotenv()
 
@@ -22,1155 +23,8 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.urandom(24)
 
-db = SQLAlchemy(app)
+db.init_app(app)
 
-# --- CONSTANTS ---
-# CONFIGURATION: How many months to show on dashboard charts
-DASHBOARD_MONTH_SPAN = 12
-
-#ignored from importing as this comes from checking paying the CC
-EXCLUDED_CAT = 'Ignored Credit Card Payment'
-
-#For us these categories are from a different pot of money outside this system, so do not use them for core calculations
-EXCLUDED_CAT_CORE = []
-
-#For us these specific payees are from a different pot of money outside this system, so do not use them for core calculations
-EXCLUDED_PAYEE_LABELS_CORE = []
-
-CHASE_DATE_REGEX = re.compile(r"Opening/Closing Date\s*([\d/]+)\s*-\s*([\d/]+)")
-CHASE_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*)")
-HSA_PERIOD_REGEX = re.compile(r"Period\s*:?\s*(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4})\s*through\s*(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4})", re.IGNORECASE)
-AMOUNT_REGEX = re.compile(r"([\d,]+\.\d{2})(?=\s*$)")
-HSA_LINE_REGEX = re.compile(r"^(\d{2}/\d{2}/\d{4})\s+(.*?)\s+([\(]?[\d,]+\.\d{2}[\)]?)\s+[\d,]+\.\d{2}")
-
-#WF
-WF_DATE_HEADER_REGEX = re.compile(r"([A-Z][a-z]+ \d{1,2}, \d{4})\s+Page") # Matches "November 18, 2025 Page..."
-WF_BEGIN_BAL_REGEX = re.compile(r"Beginning balance on (\d{1,2}/\d{1,2})")
-WF_END_BAL_REGEX = re.compile(r"Ending balance on (\d{1,2}/\d{1,2})")
-WF_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*?)\s+([\d,]+\.\d{2})")
-# Matches line starting with MM/DD: "10/17 Blue Cross ... 3,665.45"
-# Group 1: Date, Group 2: Description + Numbers
-WF_TEXT_LINE_REGEX = re.compile(r"^(\d{1,2}/\d{1,2})\s+(.*)")
-# --- MIXINS ---
-
-class TimestampMixin(object):
-    created_at = db.Column(db.DateTime, server_default=func.now(), nullable=False)
-    updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
-
-# --- MODELS ---
-
-class Account(db.Model, TimestampMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), nullable=False)
-    account_type = db.Column(db.String(50), nullable=False) 
-    transactions = db.relationship('Transaction', backref='account', lazy=True, cascade="all, delete-orphan")
-    __table_args__ = (db.UniqueConstraint('name', 'account_type', name='_account_uc'),)
-    
-class StatementRecord(db.Model, TimestampMixin):
-    """Tracks uploaded PDF statement periods to prevent duplicates."""
-    id = db.Column(db.Integer, primary_key=True)
-    account_id = db.Column(db.Integer, db.ForeignKey('account.id'), nullable=False)
-    start_date = db.Column(db.Date, nullable=False, index=True)
-    end_date = db.Column(db.Date, nullable=False)
-    
-    account = db.relationship('Account', backref='statement_records', lazy=True)
-
-    __table_args__ = (
-        db.UniqueConstraint('account_id', 'start_date', 'end_date', name='_statement_period_uc'),
-    )
-
-class Category(db.Model, TimestampMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), nullable=False, unique=True) # Unique creates an implicit index
-    type = db.Column(db.String(20), nullable=False)
-    transactions = db.relationship('Transaction', backref='category', lazy=True)
-    entities = db.relationship('Entity', backref='category', lazy=True)
-
-class Entity(db.Model, TimestampMixin):
-    """Simplified entity model combining Payee + PayeeRule functionality."""
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False, unique=True, index=True)
-    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=False)
-    match_patterns = db.Column(db.JSON, default=list)
-    match_type = db.Column(db.String(20), default='any', nullable=False)
-    is_auto_created = db.Column(db.Boolean, default=False, nullable=False, index=True)
-    notes = db.Column(db.Text, nullable=True)
-    transactions = db.relationship('Transaction', backref='entity', lazy=True)
-    
-    __table_args__ = (
-        db.Index('idx_entity_category', 'category_id'),
-    )
-
-class Transaction(db.Model, TimestampMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.Date, nullable=False)
-    original_description = db.Column(db.String(500), nullable=True) 
-    amount = db.Column(db.Numeric(10, 2), nullable=False)
-    entity_id = db.Column(db.Integer, db.ForeignKey('entity.id'), nullable=False)
-    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=False)
-    account_id = db.Column(db.Integer, db.ForeignKey('account.id'), nullable=False)
-    is_deleted = db.Column(db.Boolean, default=False, nullable=False)
-    
-    __table_args__ = (
-        # Composite index for date filtering which usually also filters by is_deleted
-        db.Index('idx_tx_date_deleted', 'date', 'is_deleted'),
-        # Index Foreign Keys for faster joins
-        db.Index('idx_tx_category', 'category_id'),
-        db.Index('idx_tx_account', 'account_id'),
-        db.Index('idx_tx_entity', 'entity_id'),
-    )
-
-class Event(db.Model, TimestampMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.Date, nullable=False)
-    description = db.Column(db.String(500), nullable=False)
-    __table_args__ = (db.UniqueConstraint('date', 'description', name='_event_uc'),)
-
-class Budget(db.Model, TimestampMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False, unique=True)
-    start_date = db.Column(db.Date, nullable=True)
-    end_date = db.Column(db.Date, nullable=True)
-    criteria = db.Column(db.Text, nullable=False)
-
-class BudgetPlan(db.Model, TimestampMixin):
-    """A named budget plan containing expected monthly amounts."""
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False, unique=True)
-    is_active = db.Column(db.Boolean, default=False, nullable=False, index=True)
-    line_items = db.relationship('BudgetLineItem', backref='budget_plan', lazy=True, cascade='all, delete-orphan')
-
-class BudgetLineItem(db.Model, TimestampMixin):
-    """A single line item in a budget plan with an expected amount and frequency."""
-    id = db.Column(db.Integer, primary_key=True)
-    budget_id = db.Column(db.Integer, db.ForeignKey('budget_plan.id'), nullable=False)
-    label = db.Column(db.String(200), nullable=False)
-    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)
-    entity_id = db.Column(db.Integer, db.ForeignKey('entity.id'), nullable=True)
-    expected_amount = db.Column(db.Numeric(10, 2), nullable=False, default=0)
-    item_type = db.Column(db.String(20), nullable=False, default='expense')  # 'expense' or 'income'
-    frequency = db.Column(db.String(20), nullable=False, default='monthly')  # 'monthly', 'quarterly', 'annual'
-    notes = db.Column(db.Text, nullable=True)
-
-    category = db.relationship('Category', lazy=True)
-    entity = db.relationship('Entity', lazy=True)
-
-    __table_args__ = (
-        db.Index('idx_bli_budget', 'budget_id'),
-    )
-
-# --- INITIALIZATION ---
-
-def create_tables():
-    db.create_all()
-
-    if Category.query.count() == 0:
-        uncat = Category(name='Uncategorized', type='Expense')
-        db.session.add(uncat)
-        db.session.commit() 
-        initial_cats = [
-            {'name': 'Salary', 'type': 'Income'}, {'name': 'Empower IRA', 'type': 'Income'}, {'name': 'Rental', 'type': 'Income'}, {'name': 'Venmo', 'type': 'Income'}, {'name': 'Checks', 'type': 'Income'}, {'name': 'Investment Income', 'type': 'Income'}, {'name': 'Reimbursements', 'type': 'Income'}, {'name': 'Other Income', 'type': 'Income'},
-            {'name': 'Housing', 'type': 'Expense'}, {'name': 'Pets', 'type': 'Expense'}, {'name': 'Car Payment', 'type': 'Expense'}, {'name': 'Utilities', 'type': 'Expense'}, {'name': 'Groceries', 'type': 'Expense'}, {'name': 'Transportation', 'type': 'Expense'}, {'name': 'Insurance', 'type': 'Expense'}, {'name': 'Medical', 'type': 'Expense'}, {'name': 'Education', 'type': 'Expense'},
-            {'name': 'Eat Out', 'type': 'Expense'}, {'name': 'Shopping', 'type': 'Expense'}, {'name': 'Entertainment', 'type': 'Expense'}, {'name': 'Personal Care', 'type': 'Expense'}, {'name': 'Travel', 'type': 'Expense'}, {'name': 'Household', 'type': 'Expense'}, {'name': 'Gifts & Donations', 'type': 'Expense'},
-            {'name': 'Ignored Credit Card Payment', 'type': 'Transfer'}, {'name': 'Savings Transfer', 'type': 'Transfer'}, {'name': 'Investment Transfer', 'type': 'Transfer'},
-        ]
-        for c in initial_cats: db.session.add(Category(**c))
-        db.session.commit()
-
-# --- LOGIC HELPERS ---
-
-def get_uncategorized_id():
-    return Category.query.filter_by(name='Uncategorized').first().id
-
-def try_parse_date(date_str):
-    if not date_str: return None
-    date_str = date_str.strip()
-    
-    # Try Standard ISO format first (HTML5 Date Input)
-    try:
-        return datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        pass
-
-    # Normalize separators for other formats
-    clean_date_str = date_str.replace('.', '/').replace('-', '/')
-    for fmt in ('%m/%d/%y', '%m/%d/%Y'):
-        try:
-            return datetime.strptime(clean_date_str, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-def get_active_budget():
-    """Returns the active BudgetPlan with line_items eagerly loaded, or None."""
-    return BudgetPlan.query.options(
-        joinedload(BudgetPlan.line_items).joinedload(BudgetLineItem.category),
-        joinedload(BudgetPlan.line_items).joinedload(BudgetLineItem.entity),
-    ).filter_by(is_active=True).first()
-
-def get_budget_core_filters(budget):
-    """Extract sorted line items from budget for core filtering.
-    Returns sorted line items (entity-specific first) or None if no budget.
-    """
-    if not budget:
-        return None
-    # Sort: entity-specific items first (more specific), then category-only (more general)
-    line_items = sorted(budget.line_items, key=lambda x: (0 if x.entity_id else 1, x.label))
-    return line_items
-
-def is_transaction_budgeted(t, budgeted_line_items):
-    """Check if a transaction matches any budget line item.
-    Entity-specific items take precedence to prevent double-counting.
-    Uses same matching logic as budget vs actual page.
-    """
-    if not budgeted_line_items:
-        return False
-    
-    for li in budgeted_line_items:
-        # If entity is specified, only match by entity
-        if li.entity_id:
-            if t.entity_id == li.entity_id:
-                return True
-        # Otherwise, match by category
-        elif li.category_id and t.category_id == li.category_id:
-            return True
-    
-    return False
-
-# --- ENTITY-BASED MATCHING FUNCTIONS ---
-
-def find_or_create_entity(description, amount, uncat_id):
-    """
-    Smart entity matching with auto-creation.
-    Returns: (entity, category_id)
-    """
-    desc_upper = description.upper().strip()
-    clean_name = description.title()
-    
-    # 1. Try to match existing entities by their patterns (most specific first)
-    entities = Entity.query.filter(Entity.match_patterns != None).all()
-    
-    for entity in entities:
-        if entity.match_patterns:
-            for pattern in entity.match_patterns:
-                if pattern.upper() in desc_upper:
-                    return entity, entity.category_id
-    
-    # 2. Try exact name match (for auto-created entities)
-    entity = Entity.query.filter_by(name=clean_name).first()
-    if entity:
-        return entity, entity.category_id
-    
-    # 3. Create new auto-entity
-    new_entity = Entity(
-        name=clean_name,
-        category_id=uncat_id,
-        match_patterns=[],
-        is_auto_created=True
-    )
-    db.session.add(new_entity)
-    db.session.commit()
-    
-    return new_entity, uncat_id
-
-def update_entity_patterns(entity_id, patterns, category_id, match_type='any'):
-    """Update an entity's match patterns and category."""
-    entity = db.session.get(Entity, entity_id)
-    if entity:
-        entity.match_patterns = patterns if isinstance(patterns, list) else [patterns]
-        entity.category_id = category_id
-        entity.match_type = match_type
-        entity.is_auto_created = False
-        db.session.commit()
-        return True
-    return False
-
-def apply_entity_to_transactions(entity_id, category_id):
-    """Apply entity's category to all its transactions."""
-    count = Transaction.query.filter_by(entity_id=entity_id).update(
-        {'category_id': category_id}, 
-        synchronize_session=False
-    )
-    db.session.commit()
-    return count
-
-def auto_match_transactions_to_entity(entity):
-    """
-    Auto-match unassigned transactions to this entity based on match patterns.
-    Finds all transactions assigned to auto-created entities and reassigns
-    any that match this entity's patterns.
-    Returns count of reassigned transactions.
-    """
-    if not entity.match_patterns:
-        return 0
-    
-    # Get all auto-created entity IDs (these are "unassigned" transactions)
-    auto_entity_ids = [e.id for e in Entity.query.filter_by(is_auto_created=True).all()]
-    
-    if not auto_entity_ids:
-        return 0
-    
-    # Get all transactions assigned to auto-created entities
-    unassigned_txs = Transaction.query.filter(
-        Transaction.entity_id.in_(auto_entity_ids),
-        Transaction.is_deleted == False
-    ).all()
-    
-    matched_count = 0
-    for tx in unassigned_txs:
-        desc_upper = tx.original_description.upper().strip()
-        
-        # Check if transaction matches any of the entity's patterns
-        for pattern in entity.match_patterns:
-            if pattern.upper() in desc_upper:
-                # Match found - reassign transaction
-                tx.entity_id = entity.id
-                tx.category_id = entity.category_id
-                matched_count += 1
-                break  # Stop checking patterns for this transaction
-    
-    if matched_count > 0:
-        db.session.commit()
-    
-    return matched_count
-
-def rematch_all_entities():
-    """Re-run entity matching on all auto-created entities."""
-    uncat_id = get_uncategorized_id()
-    auto_entities = Entity.query.filter_by(is_auto_created=True).all()
-    
-    # Get all rule-based entities with patterns
-    rule_entities = Entity.query.filter(
-        Entity.is_auto_created == False,
-        Entity.match_patterns != None
-    ).all()
-    
-    updated = 0
-    for auto_entity in auto_entities:
-        name_upper = auto_entity.name.upper()
-        matched = False
-        
-        # Try to match against rule entities
-        for rule_entity in rule_entities:
-            if rule_entity.match_patterns:
-                for pattern in rule_entity.match_patterns:
-                    if pattern.upper() in name_upper:
-                        # Merge: reassign all transactions to the rule entity
-                        Transaction.query.filter_by(entity_id=auto_entity.id).update(
-                            {'entity_id': rule_entity.id, 'category_id': rule_entity.category_id},
-                            synchronize_session=False
-                        )
-                        
-                        # Delete the auto entity
-                        db.session.delete(auto_entity)
-                        updated += 1
-                        matched = True
-                        break
-                if matched: break
-    
-    db.session.commit()
-    return updated
-
-def parse_chase_pdf(file_stream):
-    """
-    Returns a tuple: (transactions_list, period_start_date, period_end_date)
-    or (None, None, None) on failure.
-    """
-    transactions = []
-    period_start = None
-    period_end = None
-    try:
-        with pdfplumber.open(file_stream) as pdf:
-            # 1. Extract Date Range
-            page1_text = pdf.pages[0].extract_text()
-            date_match = CHASE_DATE_REGEX.search(page1_text)
-            if not date_match: return None, None, None
-            
-            period_start = datetime.strptime(date_match.group(1), '%m/%d/%y').date()
-            period_end = datetime.strptime(date_match.group(2), '%m/%d/%y').date()
-            end_year, end_month = period_end.year, period_end.month
-
-            # 2. Extract Transactions
-            full_text = ""
-            for p in pdf.pages:
-                txt = p.extract_text()
-                if txt: full_text += txt + "\n"
-            lines = full_text.split('\n')
-            current_multiplier = -1 
-            for line in lines:
-                if "PAYMENTS AND OTHER CREDITS" in line.upper(): current_multiplier = 1
-                elif "PURCHASE" in line.upper(): current_multiplier = -1
-                match = CHASE_LINE_REGEX.search(line)
-                if match:
-                    d_str, remainder = match.groups()
-                    amt_match = AMOUNT_REGEX.search(remainder)
-                    if amt_match:
-                        amt_str = amt_match.group(1)
-                        desc_raw = remainder[:amt_match.start()].strip()
-                        if "Order Number" in desc_raw: continue
-                        try:
-                            t_month = int(d_str.split('/')[0])
-                            year = end_year if t_month <= end_month else end_year - 1
-                            dt = datetime.strptime(f"{t_month}/{d_str.split('/')[1]}/{year}", '%m/%d/%Y').date()
-                            val = abs(float(amt_str.replace(',', '')))
-                            final_amount = val * current_multiplier
-                            transactions.append({'Date': dt, 'Description': desc_raw, 'Amount': final_amount})
-                        except Exception: continue
-        return transactions, period_start, period_end
-    except Exception as e: 
-        print(f"PDF Parse Error: {e}")
-        return None, None, None
-    
-def parse_wellsfargo_pdf(file_stream):
-    """
-    Parses Wells Fargo PDF using Text Lines + Regex (No Tables).
-    Looks for 'Transaction history' trigger, then parses lines with dates.
-    """
-    transactions = []
-    period_start = None
-    period_end = None
-    statement_year = date.today().year
-    
-    transaction_section_found = False
-    
-    try:
-        with pdfplumber.open(file_stream) as pdf:
-            full_text = ""
-            # Extract all text first
-            for p in pdf.pages: full_text += p.extract_text() + "\n"
-
-            # 1. Extract Statement Dates (Header/Summary)
-            header_match = WF_DATE_HEADER_REGEX.search(full_text)
-            if header_match:
-                try:
-                    dt_str = header_match.group(1)
-                    statement_date_obj = datetime.strptime(dt_str, "%B %d, %Y").date()
-                    statement_year = statement_date_obj.year
-                except ValueError: pass
-            
-            start_match = WF_BEGIN_BAL_REGEX.search(full_text)
-            end_match = WF_END_BAL_REGEX.search(full_text)
-            if start_match and end_match:
-                try:
-                    p_start_str = f"{start_match.group(1)}/{statement_year}"
-                    p_end_str = f"{end_match.group(1)}/{statement_year}"
-                    period_start = datetime.strptime(p_start_str, "%m/%d/%Y").date()
-                    period_end = datetime.strptime(p_end_str, "%m/%d/%Y").date()
-                    if period_end < period_start:
-                        period_start = period_start.replace(year=statement_year - 1)
-                except ValueError: pass
-
-            # 2. Parse Lines for Transactions
-            lines = full_text.split('\n')
-            
-            for line in lines:
-                # Trigger: Start parsing AFTER "Transaction history"
-                if "Transaction history" in line:
-                    transaction_section_found = True
-                    continue
-                
-                if not transaction_section_found:
-                    continue
-                
-                # Stop Trigger: Common end sections (Ending Daily Balance summary usually follows, but we can just rely on regex matches)
-                # Optionally stop if "Monthly service fee summary"
-                if "Monthly service fee summary" in line:
-                    break
-
-                # REGEX: Look for "MM/DD <Desc> <Amount(s)>"
-                match = WF_TEXT_LINE_REGEX.search(line)
-                if match:
-                    date_str, rest = match.groups()
-                    
-                    # Attempt to find numbers at end of string
-                    # Logic: Find all matches of numbers like "1,234.56" at end
-                    # If 2 found: Transaction Amount | Balance
-                    # If 1 found: Transaction Amount
-                    
-                    numbers = re.findall(r"([\d,]+\.\d{2})", rest)
-                    if not numbers: continue
-                    
-                    # Last number is balance if there are 2+, second to last is amount
-                    # Or if just 1, it is amount.
-                    # BUT text extraction might put balance on next line.
-                    # Let's assume the LAST number on the transaction line is the amount if only 1 number exists.
-                    # If 2 numbers exist, the FIRST one is amount, SECOND is balance.
-                    
-                    try:
-                        raw_amount_str = numbers[0]
-                        if len(numbers) >= 2:
-                            raw_amount_str = numbers[0] # First number is transaction, second is balance
-                        
-                        amount = float(raw_amount_str.replace(',', ''))
-                        
-                        # Clean description: remove the numbers from the end string
-                        desc = rest.split(raw_amount_str)[0].strip()
-
-                        # Direction Logic (Heuristic since text loses columns)
-                        # Keywords for INCOME (Positive)
-                        income_keywords = ['DEPOSIT', 'PAYROLL', 'TRANSFER FROM', 'INTEREST', 'ZELLE FROM', 'VENMO PAYMENT']
-                        # Keywords for EXPENSE (Negative) - Default
-                        
-                        is_income = any(k in desc.upper() for k in income_keywords)
-                        
-                        if not is_income:
-                            amount = -amount
-                        
-                        # Parse Date
-                        t_month = int(date_str.split('/')[0])
-                        t_year = statement_year
-                        if period_end and period_end.month < 6 and t_month > 6:
-                            t_year -= 1
-                        
-                        t_date = datetime.strptime(f"{date_str}/{t_year}", "%m/%d/%Y").date()
-                        
-                        transactions.append({'Date': t_date, 'Description': desc, 'Amount': amount})
-                        
-                    except ValueError: continue
-
-        return transactions, period_start, period_end
-    except Exception as e:
-        print(f"WF PDF Parse Error: {e}")
-        return None, None, None
-
-def get_monthly_summary_direct(month_offset):
-    today = date.today()
-    idx = today.month - 1 + month_offset
-    year, month = today.year + (idx // 12), (idx % 12) + 1
-    start, end = date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
-    current_month_name = start.strftime('%B %Y')
-    return {'start_date': start, 'end_date': end, 'current_month_name': current_month_name}
-
-def parse_hsa_pdf(file_stream):
-    """
-    Returns a tuple: (transactions_list, period_start_date, period_end_date)
-    """
-    transactions = []
-    period_start = None
-    period_end = None
-    try:
-        with pdfplumber.open(file_stream) as pdf:
-            full_text = ""
-            for p in pdf.pages:
-                txt = p.extract_text()
-                if txt: full_text += txt + "\n"
-            
-            # 1. Extract Period (Flexible Year)
-            # Matches text like: Period: 10/01/25 through 10/31/25
-            
-            period_match = HSA_PERIOD_REGEX.search(full_text)
-            print(period_match)
-            if period_match:
-                period_start = try_parse_date(period_match.group(1))
-                period_end = try_parse_date(period_match.group(2))
-
-            lines = full_text.split('\n')
-            for line in lines:
-                match = HSA_LINE_REGEX.search(line)
-                if match:
-                    date_str, desc, amt_str = match.groups()
-                    try:
-                        dt = datetime.strptime(date_str, '%m/%d/%Y').date()
-                        is_negative = '(' in amt_str or ')' in amt_str
-                        clean_amt = amt_str.replace('(', '').replace(')', '').replace(',', '')
-                        amount = float(clean_amt)
-                        
-                        if is_negative:
-                            amount = -amount
-                        
-                        # STRICTLY IGNORE CONTRIBUTIONS (Positive numbers)
-                        if amount >= 0:
-                            continue
-
-                        transactions.append({'Date': dt, 'Description': desc.strip(), 'Amount': amount})
-                    except ValueError:
-                        continue 
-        return transactions, period_start, period_end
-    except Exception as e:
-        print(f"HSA PDF Parse Error: {e}")
-        return None, None, None
-
-def get_monthly_summary_direct(month_offset):
-    today = date.today()
-    idx = today.month - 1 + month_offset
-    year, month = today.year + (idx // 12), (idx % 12) + 1
-    start, end = date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
-    current_month_name = start.strftime('%B %Y')
-    return {'start_date': start, 'end_date': end, 'current_month_name': current_month_name}
-
-# --- DASHBOARD SERVICE ---
-
-class DashboardService:
-    def __init__(self, view_mode='monthly', year=None):
-        self.view_mode = view_mode
-        
-        # 1. Determine Core Anchor Date
-        # Logic: Find the max date available for EACH core account type separately.
-        # Then take the MINIMUM of those dates.
-        # Example: Checking has Dec 11, CC has Nov 11 -> We use Nov 11.
-        # This prevents the dashboard from showing a month where one major account is missing data.
-        
-        core_types = ['checking', 'credit_card']
-        
-        # Get the max statement date for each account type present in the database
-        type_max_dates = db.session.query(func.max(StatementRecord.end_date))\
-            .join(Account)\
-            .filter(Account.account_type.in_(core_types))\
-            .group_by(Account.account_type)\
-            .all()
-            
-        # type_max_dates returns a list of tuples like [(date(2025,11,11),), (date(2025,12,11),)]
-        valid_dates = [d[0] for d in type_max_dates if d[0] is not None]
-        
-        if valid_dates:
-            # We take the MIN of the MAXs
-            self.today = min(valid_dates)
-        else:
-            # Fallback if no statements exist at all
-            self.today = date.today()
-
-        # Store the year to display (default to current year from data)
-        self.display_year = year if year else self.today.year
-        
-        # 2. Determine HSA Anchor Date (Independent of Core)
-        hsa_max_date = db.session.query(func.max(StatementRecord.end_date))\
-            .join(Account)\
-            .filter(Account.account_type == 'hsa').scalar()
-            
-        self.hsa_today = hsa_max_date if hsa_max_date else date.today()
-        
-        # Calculate start date based on configuration (using Core date)
-        months_back = max(24, DASHBOARD_MONTH_SPAN + 6) 
-        
-        y_hist, m_hist = self.today.year, self.today.month - months_back
-        while m_hist <= 0:
-            m_hist += 12
-            y_hist -= 1
-        
-        self.fetch_start_date = date(y_hist, m_hist, 1)
-        
-        # Fetch ALL transactions first
-        all_txs = Transaction.query.options(
-            joinedload(Transaction.category),
-            joinedload(Transaction.account),
-            joinedload(Transaction.entity)
-        ).filter(
-            Transaction.date >= self.fetch_start_date,
-            Transaction.is_deleted == False
-        ).all()
-
-        self.events = Event.query.filter(Event.date >= self.fetch_start_date).all()
-        self.savings_account_ids = {a.id for a in Account.query.filter_by(account_type='savings').all()}
-        self.hsa_account_ids = {a.id for a in Account.query.filter_by(account_type='hsa').all()}
-
-        self.core_transactions = [t for t in all_txs if t.account_id not in self.hsa_account_ids]
-        self.hsa_transactions = [t for t in all_txs if t.account_id in self.hsa_account_ids]
-        
-        # Load active budget for core filtering
-        self.active_budget = get_active_budget()
-        self.budget_line_items = get_budget_core_filters(self.active_budget)
-        self.has_budget = self.active_budget is not None
-        
-        self.base_layout = dict(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#71717a'), autosize=True)
-        self.margin_std = dict(t=40, b=20, l=50, r=10)
-        self.margin_legend = dict(t=40, b=100, l=50, r=10) 
-        self.margin_events = dict(t=60, b=20, l=50, r=10)
-        
-        # Update X-axis format based on view mode
-        tick_fmt = '%b %Y' if self.view_mode == 'monthly' else '%b %d'
-        self.xaxis_date = dict(rangeslider=dict(visible=True), type='date', tickformat=tick_fmt)
-        self.xaxis_cat = dict(rangeslider=dict(visible=False), type='category')
-    
-    def get_summary_for_dashboard(self, month_offset):
-        idx = self.today.month - 1 + month_offset
-        year, month = self.today.year + (idx // 12), (idx % 12) + 1
-        start = date(year, month, 1)
-        end = date(year, month, calendar.monthrange(year, month)[1])
-        current_month_name = start.strftime('%B %Y')
-        
-        txs = [t for t in self.core_transactions if start <= t.date <= end]
-        
-        inc = sum(t.amount for t in txs if t.amount > 0 and t.category.name != EXCLUDED_CAT)
-        exp = abs(sum(t.amount for t in txs if t.amount < 0 and t.category.name != EXCLUDED_CAT))
-        s_in = sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount > 0 and t.category.name != EXCLUDED_CAT)
-        s_out = abs(sum(t.amount for t in txs if t.account_id in self.savings_account_ids and t.amount < 0 and t.category.name != EXCLUDED_CAT))
-        net_worth = 0.0
-        balances = {}
-        
-        uncat = Transaction.query.join(Entity).filter(Entity.is_auto_created == True, Transaction.is_deleted == False).count()
-        dup_count = 0 
-        return {
-            'start_date': start, 
-            'end_date': end, 
-            'current_month_name': current_month_name, 
-            'total_income': float(inc), 
-            'total_expense': float(exp), 
-            'net_worth': net_worth, 
-            'account_balances': balances, 
-            'uncategorized_count': uncat, 
-            'savings_in': float(s_in), 
-            'savings_out': float(s_out), 
-            'duplicate_count': dup_count,
-            'data_anchor_date': self.today 
-        }
-    
-    def _get_period_key(self, date_obj):
-        """Helper to normalize dates to the start of the period (Month 1st or Sunday)."""
-        if self.view_mode == 'weekly':
-            # Python weekday(): Mon=0 ... Sun=6
-            # To make Sunday the start (offset 0), we shift: (weekday + 1) % 7
-            idx = (date_obj.weekday() + 1) % 7
-            return date_obj - timedelta(days=idx)
-        return date_obj.replace(day=1)
-
-    def _get_event_overlays(self, start, end):
-        relevant_events = [e for e in self.events if start <= e.date <= end]
-        events_map = {}
-        for e in relevant_events:
-            # Snap event to the bucket start date
-            key = self._get_period_key(e.date).strftime('%Y-%m-%d')
-            if key not in events_map: events_map[key] = []
-            events_map[key].append(e.description)
-        shapes = [{'type': 'line', 'x0': k, 'x1': k, 'y0': 0, 'y1': 1, 'xref': 'x', 'yref': 'paper', 'line': {'color': '#9ca3af', 'width': 1.5, 'dash': 'dot'}} for k in events_map]
-        anns = [{'x': k, 'y': 1.02, 'xref': 'x', 'yref': 'paper', 'text': "📍 " + "<br>📍 ".join(v), 'showarrow': False, 'xanchor': 'center', 'yanchor': 'bottom', 'font': {'size': 10, 'color': '#4b5563'}, 'align': 'center'} for k, v in events_map.items()] 
-        return shapes, anns
-
-    def _group_transactions(self, txs, start, end):
-        """Performance: Group transactions by period key once (O(N)) instead of filtering in loops (O(N^2))."""
-        groups = {}
-        for t in txs:
-            if start <= t.date <= end:
-                key = self._get_period_key(t.date).strftime('%Y-%m-%d')
-                if key not in groups: groups[key] = []
-                groups[key].append(t)
-        return groups
-    
-    def _chart_eat_out_patterns(self, start_date, end_date):
-        # Initialize buckets for Mon(0) to Sun(6)
-        dow_totals = {i: 0.0 for i in range(7)}
-        dow_counts = {i: 0 for i in range(7)}
-        dow_payees = {i: {} for i in range(7)}  # Track payee visit counts per day
-        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        
-        # Filter for 'Eat Out' transactions in the valid range
-        txs = [t for t in self.core_transactions 
-               if start_date <= t.date <= end_date 
-               and t.category.name == 'Eat Out']
-        
-        for t in txs:
-            idx = t.date.weekday() # 0=Mon, 6=Sun
-            dow_totals[idx] += float(abs(t.amount))
-            dow_counts[idx] += 1
-            # Track payee visit counts
-            payee_name = t.entity.name
-            dow_payees[idx][payee_name] = dow_payees[idx].get(payee_name, 0) + 1
-            
-        # Prepare Data for Plotly
-        y_vals = [dow_totals[i] for i in range(7)]
-        # Calculate Average Transaction size per day (optional, for hover text)
-        avgs = [dow_totals[i]/dow_counts[i] if dow_counts[i] > 0 else 0 for i in range(7)]
-        
-        # Find most visited restaurant for each day
-        top_restaurants = []
-        for i in range(7):
-            if dow_payees[i]:
-                top_payee = max(dow_payees[i].items(), key=lambda x: x[1])
-                top_restaurants.append(f"👑 {top_payee[0]}")
-            else:
-                top_restaurants.append("")
-        
-        # Color scale: Highlight the highest spending day
-        max_val = max(y_vals) if y_vals else 1
-        colors = ['#ef4444' if val == max_val else '#6366f1' for val in y_vals]
-
-        fig = go.Figure(data=[go.Bar(
-            x=days, 
-            y=y_vals, 
-            marker_color=colors,
-            text=y_vals,
-            texttemplate='$%{y:,.0f}',
-            textposition='auto',
-            hovertemplate='<b>%{x}</b><br>Total: $%{y:,.2f}<br>Avg Ticket: $%{customdata:,.2f}<extra></extra>',
-            customdata=avgs
-        )])
-        
-        # Add annotations for top restaurant per day
-        annotations = []
-        for i, day in enumerate(days):
-            if top_restaurants[i]:
-                annotations.append({
-                    'x': day,
-                    'y': y_vals[i],
-                    'text': top_restaurants[i],
-                    'showarrow': False,
-                    'yanchor': 'bottom',
-                    'yshift': 10,
-                    'font': {'size': 9, 'color': '#4b5563'}
-                })
-        
-        fig.update_layout(
-            title='Eat Out Spending by Day of Week',
-            yaxis=dict(title='Total Spent ($)', tickformat="$,.0f"),
-            xaxis=dict(title=''),
-            margin=self.margin_std,
-            annotations=annotations,
-            **self.base_layout
-        )
-        return to_json(fig, pretty=True)
-
-    def generate_all_charts(self):
-        # Show 12 months for the selected year
-        if self.view_mode == 'weekly':
-            # For weekly, cover the full display year (52 weeks)
-            start_date = date(self.display_year, 1, 1)
-            # Align to Sunday
-            idx = (start_date.weekday() + 1) % 7
-            start_date = start_date - timedelta(days=idx)
-            end_date = date(self.display_year, 12, 31)
-        else:
-            # For monthly, show Jan 1 to Dec 31 of display_year
-            start_date = date(self.display_year, 1, 1)
-            end_date = date(self.display_year, 12, 31)
-        
-        # Generate buckets
-        periods = []
-        curr = start_date
-        while curr <= end_date:
-            periods.append(curr)
-            if self.view_mode == 'weekly':
-                curr += timedelta(weeks=1)
-            else:
-                if curr.month == 12: curr = date(curr.year + 1, 1, 1)
-                else: curr = date(curr.year, curr.month + 1, 1)
-                
-        period_strs = [p.strftime('%Y-%m-%d') for p in periods]
-        
-        # Generate monthly periods for charts that should always be monthly
-        monthly_periods = []
-        monthly_start = date(self.display_year, 1, 1)
-        monthly_end = date(self.display_year, 12, 31)
-        curr_month = monthly_start
-        while curr_month <= monthly_end:
-            monthly_periods.append(curr_month)
-            if curr_month.month == 12:
-                curr_month = date(curr_month.year + 1, 1, 1)
-            else:
-                curr_month = date(curr_month.year, curr_month.month + 1, 1)
-        monthly_period_strs = [p.strftime('%Y-%m-%d') for p in monthly_periods]
-        
-        # Pre-group transactions
-        grouped_core = self._group_transactions(self.core_transactions, start_date, end_date)
-        
-        # Group transactions by month for monthly-only charts
-        grouped_core_monthly = self._group_transactions(self.core_transactions, monthly_start, monthly_end)
-        
-        shapes, anns = self._get_event_overlays(start_date, end_date)
-        
-        return {
-            'chart_income_vs_expense': self._chart_income_vs_expense(monthly_periods, monthly_period_strs, grouped_core_monthly, shapes, anns),
-            'chart_savings': self._chart_savings(periods, period_strs, grouped_core, shapes, anns),
-            'chart_cash_flow': self._chart_cash_flow(periods, period_strs, grouped_core, shapes, anns),
-            'chart_core_operating': self._chart_core_operating(periods, period_strs, grouped_core, shapes, anns),
-            'chart_groceries': self._chart_groceries(periods, period_strs, grouped_core, shapes, anns),
-            'chart_expense_broad': self._chart_expense_broad(monthly_periods, monthly_period_strs, grouped_core_monthly, shapes, anns),
-            'chart_core_summary': self._chart_core_summary(periods, period_strs, grouped_core, shapes, anns),
-            'chart_top_payees': self._chart_top_payees(self.core_transactions, start_date), # Logic differs (aggregate total), pass raw list
-            'chart_yoy': self._chart_yoy(), # Explicitly stays Monthly per user request
-            'chart_core_breakdown': self._chart_core_breakdown(periods, period_strs, grouped_core, shapes, anns),
-            'chart_hsa_activity': self._chart_hsa_activity(periods, period_strs, start_date, end_date),
-            'chart_eat_out_patterns': self._chart_eat_out_patterns(start_date, end_date)
-        }
-
-    def _is_core_expense(self, t):
-        """Check if a transaction is a 'core' expense.
-        Returns True for all expenses."""
-        return t.amount < 0 and t.category.name != EXCLUDED_CAT
-
-    def _is_core_income(self, t):
-        """Check if a transaction is 'core' income.
-        Returns True for all income."""
-        return t.amount > 0 and t.category.name != EXCLUDED_CAT
-
-    # --- Refactored Chart Methods (Using Grouped Data) ---
-
-    def _chart_hsa_activity(self, periods, period_strs, start_date, end_date):
-        data_by_payee = {}
-        txs = [t for t in self.hsa_transactions if start_date <= t.date <= end_date and t.amount < 0]
-        for t in txs:
-            name = t.entity.name
-            m_key = self._get_period_key(t.date).strftime('%Y-%m-%d')
-            if name not in data_by_payee: data_by_payee[name] = {}
-            data_by_payee[name][m_key] = data_by_payee[name].get(m_key, 0.0) + float(abs(t.amount))
-        traces = []
-        for name in sorted(data_by_payee.keys(), reverse=True):
-            y_vals = [data_by_payee[name].get(m, 0.0) for m in period_strs]
-            traces.append(go.Bar(name=name, x=period_strs, y=y_vals))
-        fig = go.Figure(data=traces)
-        fig.update_layout(title='HSA Expenses by Payee', yaxis=dict(title='Spent ($)', tickformat="$,.0f"), xaxis=self.xaxis_date, barmode='stack', margin=self.margin_events, **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_core_breakdown(self, periods, period_strs, grouped_txs, shapes, anns):
-        cat_data = {}
-        all_cats = set()
-        for p_str in period_strs:
-            p_txs = grouped_txs.get(p_str, [])
-            if p_str not in cat_data: cat_data[p_str] = {}
-            temp_cat_totals = {}
-            for t in p_txs:
-                if self._is_core_expense(t):
-                    c_name = t.category.name
-                    all_cats.add(c_name)
-                    temp_cat_totals[c_name] = temp_cat_totals.get(c_name, 0.0) + float(t.amount)
-            for c, val in temp_cat_totals.items():
-                cat_data[p_str][c] = abs(val) if val < 0 else 0.0
-        fig = go.Figure()
-        for cat in sorted(list(all_cats), reverse=True):
-            y_vals = [cat_data.get(m, {}).get(cat, 0) for m in period_strs]
-            fig.add_trace(go.Bar(name=cat, x=period_strs, y=y_vals))
-        fig.update_layout(title='Core Expenses by Category (Breakdown)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, legend=dict(traceorder='reversed'), **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_income_vs_expense(self, periods, period_strs, grouped_txs, shapes, anns):
-        """Building Wealth (Excl. Investments)"""
-        regular_inc, investment_withdrawals, c_exp = [], [], []
-        cumulative_surplus = 0.0
-        cumulative_net = []
-        
-        for p_str in period_strs:
-            p_txs = grouped_txs.get(p_str, [])
-            # Separate income into regular income and investment withdrawals
-            regular_inc_val = float(sum(t.amount for t in p_txs if t.amount > 0 and t.category.name != EXCLUDED_CAT and t.category.name != 'Investment'))
-            invest_withdrawal_val = float(sum(t.amount for t in p_txs if t.amount > 0 and t.category.name == 'Investment'))
-            
-            total_inc = regular_inc_val + invest_withdrawal_val
-            
-            # Expenses: all negative amounts except excluded categories AND Investment Transfer
-            # Investment transfers to investments are savings, not expenses
-            exp_val = float(abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.name != EXCLUDED_CAT and t.category.name != 'Investment')))
-            
-            # Cumulative surplus excludes investment withdrawals (only regular income vs expenses)
-            current_surplus = regular_inc_val - exp_val
-            cumulative_surplus += current_surplus
-            regular_inc.append(regular_inc_val)
-            investment_withdrawals.append(invest_withdrawal_val)
-            c_exp.append(exp_val)
-            cumulative_net.append(cumulative_surplus)
-        
-        fig = go.Figure()
-        # Investment withdrawals in red (bad - pulling money out of investments) - leftmost to avoid gaps
-        fig.add_trace(go.Bar(name='Investment Withdrawals', x=period_strs, y=investment_withdrawals, marker_color='#ef4444'))
-        # Regular income in green
-        fig.add_trace(go.Bar(name='Regular Income', x=period_strs, y=regular_inc, marker_color='#10b981'))
-        fig.add_trace(go.Bar(name='Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
-        fig.add_trace(go.Scatter(name='Cumulative Surplus', x=period_strs, y=cumulative_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
-        fig.update_layout(
-            title='Building Wealth (Excl. Investments)', 
-            barmode='group', 
-            yaxis=dict(title='$', tickformat="$,.0f"), 
-            xaxis=self.xaxis_date, 
-            showlegend=True, 
-            legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), 
-            margin=self.margin_legend, 
-            shapes=shapes, 
-            annotations=anns, 
-            **self.base_layout
-        )
-        return to_json(fig, pretty=True)
-
-    def _chart_savings(self, periods, period_strs, grouped_txs, shapes, anns):
-        net_vals, hover_txt, colors = [], [], []
-        for p_str in period_strs:
-            p_txs = grouped_txs.get(p_str, [])
-            p_txs = [t for t in p_txs if t.account_id in self.savings_account_ids and t.category.name != EXCLUDED_CAT]
-            in_val = float(sum(t.amount for t in p_txs if t.amount > 0))
-            out_val = float(abs(sum(t.amount for t in p_txs if t.amount < 0)))
-            net = in_val - out_val
-            net_vals.append(net)
-            colors.append('#10b981' if net >= 0 else '#ef4444')
-            hover_txt.append(f"Net: ${net:,.2f}<br>In: ${in_val:,.2f}<br>Out: ${out_val:,.2f}")
-        fig = go.Figure(go.Bar(x=period_strs, y=net_vals, marker_color=colors, text=net_vals, texttemplate='$%{y:,.0f}', textposition='auto', hoverinfo='text', hovertext=hover_txt))
-        fig.update_layout(title='Net Savings Flow', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_cash_flow(self, periods, period_strs, grouped_txs, shapes, anns):
-        net_vals, colors = [], []
-        for p_str in period_strs:
-            p_txs = grouped_txs.get(p_str, [])
-            p_txs = [t for t in p_txs if t.category.name != EXCLUDED_CAT]
-            inc = float(sum(t.amount for t in p_txs if t.amount > 0))
-            exp = float(abs(sum(t.amount for t in p_txs if t.amount < 0)))
-            net = inc - exp
-            net_vals.append(net)
-            colors.append('#10b981' if net >= 0 else '#ef4444')
-        fig = go.Figure(go.Bar(x=period_strs, y=net_vals, marker_color=colors, text=net_vals, texttemplate='$%{y:,.0f}', textposition='auto'))
-        fig.update_layout(title='Net Cash Flow', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_core_summary(self, periods, period_strs, grouped_txs, shapes, anns):
-        payee_map = {}
-        for p_str in period_strs:
-            p_txs = grouped_txs.get(p_str, [])
-            for t in p_txs:
-                if self._is_core_expense(t):
-                    name = t.entity.name
-                    payee_map[name] = payee_map.get(name, 0.0) + float(t.amount)
-        sorted_payees = sorted(payee_map.items(), key=lambda item: item[1])[:20]
-        sorted_payees = sorted_payees[::-1]
-        names = [p[0] for p in sorted_payees]
-        vals = [abs(p[1]) for p in sorted_payees]
-        fig = go.Figure(data=[go.Bar(x=vals, y=names, orientation='h', marker_color='#6366f1', text=vals, texttemplate='$%{x:,.0f}', hovertemplate='%{y}<br>$%{x:,.2f}<extra></extra>')])
-        fig.update_layout(title='Top 20 Core Operating Payees (Current View)', xaxis=dict(title='Total Spent', tickformat="$,.0f"), margin=self.margin_std, **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_core_operating(self, periods, period_strs, grouped_txs, shapes, anns):
-        c_inc, c_exp = [], []
-        cumulative_surplus = 0.0
-        cumulative_net = []
-        for p_str in period_strs:
-            p_txs = grouped_txs.get(p_str, [])
-            inc_val = float(sum(t.amount for t in p_txs if self._is_core_income(t)))
-            exp_val = float(abs(sum(t.amount for t in p_txs if self._is_core_expense(t))))
-            current_surplus = inc_val - exp_val
-            cumulative_surplus += current_surplus
-            c_inc.append(inc_val)
-            c_exp.append(exp_val)
-            cumulative_net.append(cumulative_surplus)
-        fig = go.Figure()
-        fig.add_trace(go.Bar(name='Core Income', x=period_strs, y=c_inc, marker_color='#10b981'))
-        fig.add_trace(go.Bar(name='Core Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
-        fig.add_trace(go.Scatter(name='Cumulative Surplus', x=period_strs, y=cumulative_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
-        fig.update_layout(title='Core Operating Performance', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_groceries(self, periods, period_strs, grouped_txs, shapes, anns):
-        groc, dine = [], []
-        for p_str in period_strs:
-            p_txs = grouped_txs.get(p_str, [])
-            groc.append(float(abs(sum(t.amount for t in p_txs if t.category.name == 'Groceries'))))
-            dine.append(float(abs(sum(t.amount for t in p_txs if t.category.name == 'Eat Out'))))
-        avg_groc = sum(groc) / len(groc) if len(groc) > 0 else 0
-        avg_dine = sum(dine) / len(dine) if len(dine) > 0 else 0
-        traces = [
-            go.Bar(name='Groceries', x=period_strs, y=groc, marker_color='#10b981'),
-            go.Bar(name='Eat Out', x=period_strs, y=dine, marker_color='#f59e0b'),
-            go.Scatter(name='Avg Groceries', x=period_strs, y=[avg_groc]*len(period_strs), mode='lines', line=dict(color='#10b981', width=2, dash='dash'), opacity=0.7),
-            go.Scatter(name='Avg Eat Out', x=period_strs, y=[avg_dine]*len(period_strs), mode='lines', line=dict(color='#f59e0b', width=2, dash='dash'), opacity=0.7)
-        ]
-        fig = go.Figure(data=traces)
-        fig.update_layout(title='Groceries vs. Eating Out', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_top_payees(self, txs, start_date):
-        income_map = {}
-        for t in txs:
-            name = t.entity.name
-            if (t.date >= start_date and
-                t.category.name != EXCLUDED_CAT and
-                t.amount > 0):  # Income transactions only
-                income_map[name] = income_map.get(name, 0.0) + float(t.amount)
-        
-        # Sort by highest income (descending), limit to 10, then reverse for chart (lowest at top)
-        sorted_sources = sorted(income_map.items(), key=lambda item: item[1], reverse=True)[:10]
-        sorted_sources = sorted_sources[::-1]  # Reverse so lowest appears at top, highest at bottom
-        names = [p[0] for p in sorted_sources]
-        vals = [p[1] for p in sorted_sources]
-        
-        fig = go.Figure(data=[go.Bar(x=vals, y=names, orientation='h', marker_color='#10b981', text=vals, texttemplate='$%{x:,.0f}', hovertemplate='%{y}<br>$%{x:,.2f}<extra></extra>')])
-        fig.update_layout(title='Top 10 Income Sources (Current View)', xaxis=dict(title='Total Income', tickformat="$,.0f"), margin=self.margin_std, **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_yoy(self):
-        years_to_show = [self.today.year - 2, self.today.year - 1, self.today.year]
-        colors = ['#9ca3af', '#f59e0b', '#6366f1']
-        fig = go.Figure()
-        for i, yr in enumerate(years_to_show):
-            yr_txs = [t for t in self.core_transactions if t.date.year == yr]
-            monthly_totals = {}
-            for t in yr_txs:
-                p_name = t.entity.name
-                if 'JEA' in p_name.upper() and t.amount < 0:
-                    m = t.date.month
-                    monthly_totals[m] = monthly_totals.get(m, 0.0) + float(t.amount)
-            y_vals = []
-            for m in range(1, 13):
-                val = monthly_totals.get(m, 0.0)
-                if yr == self.today.year and m > self.today.month:
-                    y_vals.append(None)
-                else:
-                    y_vals.append(abs(val))
-            fig.add_trace(go.Bar(name=str(yr), x=list(calendar.month_name[1:]), y=y_vals, marker_color=colors[i], text=y_vals, texttemplate='$%{y:,.0f}', hovertemplate='%{y}<br>$%{x:,.2f}<extra></extra>'))
-        fig.update_layout(title='YoY JEA Expenses (3-Year Comparison)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_cat, margin=self.margin_std, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), **self.base_layout)
-        return to_json(fig, pretty=True)
-
-    def _chart_expense_broad(self, periods, period_strs, grouped_txs, shapes, anns):
-        """Savings Rate Trend - shows percentage of income saved each period"""
-        savings_rates = []
-        colors = []
-        hover_texts = []
-        
-        for p_str in period_strs:
-            p_txs = grouped_txs.get(p_str, [])
-            p_txs = [t for t in p_txs if t.category.name != EXCLUDED_CAT]
-            
-            total_income = sum(t.amount for t in p_txs if t.amount > 0)
-            # Exclude Investment category - transfers to investments are savings, not expenses
-            total_expenses = abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.name != 'Investment'))
-            net_savings = total_income - total_expenses
-            
-            if total_income > 0:
-                savings_rate = (net_savings / total_income) * 100
-            else:
-                savings_rate = 0
-            
-            savings_rates.append(savings_rate)
-            colors.append('#10b981' if savings_rate >= 20 else '#f59e0b' if savings_rate >= 10 else '#ef4444')
-            hover_texts.append(f"Rate: {savings_rate:.1f}%<br>Income: ${total_income:,.0f}<br>Expenses: ${total_expenses:,.0f}<br>Saved: ${net_savings:,.0f}")
-        
-        fig = go.Figure()
-        
-        # Add savings rate bars
-        fig.add_trace(go.Bar(
-            x=period_strs, 
-            y=savings_rates, 
-            marker_color=colors,
-            text=[f"{rate:.1f}%" for rate in savings_rates],
-            textposition='auto',
-            hoverinfo='text',
-            hovertext=hover_texts,
-            name='Savings Rate'
-        ))
-        
-        # Add benchmark lines
-        fig.add_trace(go.Scatter(
-            x=period_strs, 
-            y=[20]*len(period_strs), 
-            mode='lines',
-            line=dict(color='#10b981', width=2, dash='dash'),
-            name='Good (20%)',
-            opacity=0.5
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=period_strs, 
-            y=[50]*len(period_strs), 
-            mode='lines',
-            line=dict(color='#6366f1', width=2, dash='dash'),
-            name='Excellent (50%)',
-            opacity=0.5
-        ))
-        
-        fig.update_layout(
-            title='Savings Rate Trend',
-            yaxis=dict(title='Savings Rate (%)', tickformat=".0f", range=[min(0, min(savings_rates) - 5) if savings_rates else 0, max(60, max(savings_rates) + 5) if savings_rates else 60]),
-            xaxis=self.xaxis_date,
-            shapes=shapes,
-            annotations=anns,
-            margin=self.margin_events,
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
-            **self.base_layout
-        )
-        return to_json(fig, pretty=True)
 
 # --- AI INSIGHTS LOGIC ---
 
@@ -1299,18 +153,25 @@ def upload_file():
 
             # 1. Handle CSV (Uses Manual Dates)
             if file.filename.lower().endswith('.csv'):
-                stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
-                # Use header parameter based on checkbox
-                df = pd.read_csv(stream, header=0 if csv_has_header else None)
-                
-                # CSV Processing Logic
-                if df.shape[1] >= 5:
-                    df = df.iloc[:, [0, 1, 4]]
-                    df.columns = ['Date', 'Amount', 'Description']
-                
-                # Use manual dates for CSVs if provided
-                if manual_start and manual_end:
-                    p_start, p_end = manual_start, manual_end
+                if account.account_type == 'brokerage':
+                    data, parsed_start, parsed_end = parse_fidelity_csv(file.stream)
+                    p_start = parsed_start if parsed_start else manual_start
+                    p_end = parsed_end if parsed_end else manual_end
+                    if data:
+                        df = pd.DataFrame(data)
+                else:
+                    stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+                    # Use header parameter based on checkbox
+                    df = pd.read_csv(stream, header=0 if csv_has_header else None)
+                    
+                    # CSV Processing Logic
+                    if df.shape[1] >= 5:
+                        df = df.iloc[:, [0, 1, 4]]
+                        df.columns = ['Date', 'Amount', 'Description']
+                    
+                    # Use manual dates for CSVs if provided
+                    if manual_start and manual_end:
+                        p_start, p_end = manual_start, manual_end
                 
             # 2. Handle PDF (Attempts Parsing, falls back to Manual)
             elif file.filename.lower().endswith('.pdf'):
@@ -1542,31 +403,37 @@ def apply_entity_patterns(entity_id):
 def sync_entity_categories():
     """Sync entity categories to match their transactions' most common category"""
     try:
+        cat_map = {c.id: c.name for c in Category.query.all()}
+
+        dominant = db.session.query(
+            Transaction.entity_id,
+            Transaction.category_id,
+            func.count(Transaction.id).label('cnt')
+        ).filter(Transaction.is_deleted == False)\
+         .group_by(Transaction.entity_id, Transaction.category_id)\
+         .order_by(Transaction.entity_id, func.count(Transaction.id).desc())\
+         .all()
+
+        best_cat = {}
+        for row in dominant:
+            if row.entity_id not in best_cat:
+                best_cat[row.entity_id] = row.category_id
+
         entities = Entity.query.all()
         synced = 0
         skipped = 0
         details = []
-        
+
         for entity in entities:
-            # Get most common category from this entity's transactions
-            result = db.session.query(
-                Transaction.category_id,
-                func.count(Transaction.id).label('count')
-            ).filter(
-                Transaction.entity_id == entity.id,
-                Transaction.is_deleted == False
-            ).group_by(Transaction.category_id).order_by(func.count(Transaction.id).desc()).first()
-            
-            if result:
-                if result.category_id != entity.category_id:
-                    old_cat = Category.query.get(entity.category_id).name if entity.category_id else "None"
-                    new_cat = Category.query.get(result.category_id).name if result.category_id else "None"
-                    entity.category_id = result.category_id
-                    synced += 1
-                    details.append(f"{entity.name}: {old_cat} → {new_cat}")
-            else:
-                # No transactions for this entity
+            top_cat_id = best_cat.get(entity.id)
+            if top_cat_id is None:
                 skipped += 1
+            elif top_cat_id != entity.category_id:
+                old_name = cat_map.get(entity.category_id, 'None')
+                new_name = cat_map.get(top_cat_id, 'None')
+                entity.category_id = top_cat_id
+                synced += 1
+                details.append(f"{entity.name}: {old_name} → {new_name}")
         
         db.session.commit()
         msg = f'Synced {synced} entities, skipped {skipped} with no transactions.'
@@ -1590,14 +457,15 @@ def api_rematch_all_entities():
 def delete_orphaned_entities():
     """Delete entities that have no transactions"""
     try:
-        entities = Entity.query.all()
-        deleted = []
-        
-        for entity in entities:
-            tx_count = Transaction.query.filter_by(entity_id=entity.id, is_deleted=False).count()
-            if tx_count == 0:
-                deleted.append(entity.name)
-                db.session.delete(entity)
+        orphaned = Entity.query.filter(
+            ~exists().where(
+                (Transaction.entity_id == Entity.id) &
+                (Transaction.is_deleted == False)
+            )
+        ).all()
+        deleted = [e.name for e in orphaned]
+        for entity in orphaned:
+            db.session.delete(entity)
         
         db.session.commit()
         count = len(deleted)
@@ -1752,12 +620,11 @@ def categorize():
     if srch: q = q.filter(or_(Entity.name.ilike(f"%{srch}%"), Transaction.original_description.ilike(f"%{srch}%")))
     txs = q.order_by(Transaction.date.desc()).limit(500 if (srch or year or month) else 50).all()
     cats = Category.query.order_by(Category.name).all()
-    labels = [r.name for r in db.session.query(Entity.name).distinct().order_by(Entity.name).all()]
+    all_entities = db.session.query(Entity.name, Entity.category_id).order_by(Entity.name).all()
+    labels = [e.name for e in all_entities]
+    entity_category_map = {e.name: e.category_id for e in all_entities}
     available_years = [int(y[0]) for y in db.session.query(extract('year', Transaction.date)).distinct().order_by(extract('year', Transaction.date).desc()).all()]
     month_choices = [(str(i), calendar.month_name[i]) for i in range(1, 13)]
-    
-    # Build entity-to-category mapping for auto-selection
-    entity_category_map = {e.name: e.category_id for e in Entity.query.all()}
     
     return render_template('categorize.html', transactions=txs, categories=cats, filter_type=filt, search_query=srch, selected_year=year, selected_month=month, available_years=available_years, existing_labels=labels, month_choices=month_choices, entity_category_map=entity_category_map)
 
@@ -2411,7 +1278,7 @@ def api_budget_vs_actual():
 @app.route('/edit_accounts')
 def edit_accounts():
     accs = Account.query.order_by(Account.name).all()
-    return render_template('edit_account_balances.html', accounts=accs, account_types=['checking','savings','credit_card'])
+    return render_template('edit_account_balances.html', accounts=accs, account_types=['checking','savings','credit_card','brokerage'])
 
 @app.route('/add_account', methods=['POST'])
 def add_account():
@@ -2731,4 +1598,4 @@ def api_date_range():
 
 if __name__ == '__main__':
     with app.app_context(): create_tables()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)

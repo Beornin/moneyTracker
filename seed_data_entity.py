@@ -1,7 +1,8 @@
 import random
 from datetime import date, timedelta
 import json
-from app import app, db, Account, Category, Entity, Transaction, Event, Budget, StatementRecord
+from app import app
+from models import db, Account, Category, Entity, Transaction, Event, Budget, StatementRecord
 
 def get_date_range(start_date, end_date):
     """Generator for iterating through dates."""
