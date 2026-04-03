@@ -196,7 +196,14 @@
             </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div class="mb-8">
+            <button onclick="toggleActions()" class="w-full flex items-center justify-between px-5 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                <span class="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+                    <i class="fa-solid fa-sliders mr-2"></i>Upload &amp; Account Actions
+                </span>
+                <i id="actions-chevron" class="fa-solid fa-chevron-down text-gray-400 transition-transform duration-200"></i>
+            </button>
+            <div id="actions-panel" class="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-4 overflow-hidden transition-all duration-300">
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-200 dark:border-blue-900">
                 <h3 class="text-xl font-semibold text-blue-800 dark:text-blue-300 mb-4">
                     <i class="fa-solid fa-upload mr-2"></i>Upload Transactions
@@ -283,6 +290,7 @@
                         <i class="fa-solid fa-circle-plus mr-2"></i>Create Account
                     </button>
                 </form>
+            </div>
             </div>
         </div>
 
@@ -502,6 +510,19 @@
             </div>
         </div>
 
+        <div class="w-full mb-8">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-300 dark:border-blue-800 h-[400px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-chart-line text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>What is this?</strong> Passive income (brokerage) as a percentage of core monthly expenses.<br>
+                        <strong>Green</strong> = fully covered. The dashed red line marks 100% coverage.
+                    </span>
+                </div>
+                <div id="chart-passive-coverage" class="w-full h-full"></div>
+            </div>
+        </div>
+
         <script>
             
             function renderChart(plotData, divId) {
@@ -539,6 +560,7 @@
                 const plot11 = {{ chart_hsa_activity|safe if chart_hsa_activity else 'null' }}; // NEW CHART
                 const plot12 = {{ chart_eat_out_patterns|safe if chart_eat_out_patterns else 'null' }};
                 const plot13 = {{ chart_brokerage_income|safe if chart_brokerage_income else 'null' }};
+                const plot14 = {{ chart_passive_coverage|safe if chart_passive_coverage else 'null' }};
 
                 renderChart(plot1, 'chart-income-expense');
                 renderChart(plot4, 'chart-core-operating');
@@ -551,6 +573,7 @@
                 renderChart(plot11, 'chart-hsa-activity');
                 renderChart(plot12, 'chart-eat-out-patterns');
                 renderChart(plot13, 'chart-brokerage-income');
+                renderChart(plot14, 'chart-passive-coverage');
             }
 
             var themeToggleBtn = document.getElementById('theme-toggle');
@@ -562,6 +585,37 @@
             } else {
                 themeToggleDarkIcon.classList.remove('hidden');
             }
+
+            function toggleActions() {
+                const panel = document.getElementById('actions-panel');
+                const chevron = document.getElementById('actions-chevron');
+                const collapsed = panel.style.maxHeight && panel.style.maxHeight !== '0px';
+                if (collapsed) {
+                    panel.style.maxHeight = '0px';
+                    panel.style.opacity = '0';
+                    chevron.style.transform = 'rotate(-90deg)';
+                    localStorage.setItem('actionsCollapsed', '1');
+                } else {
+                    panel.style.maxHeight = panel.scrollHeight + 'px';
+                    panel.style.opacity = '1';
+                    chevron.style.transform = 'rotate(0deg)';
+                    localStorage.setItem('actionsCollapsed', '0');
+                }
+            }
+
+            (function initActionsPanel() {
+                const panel = document.getElementById('actions-panel');
+                const chevron = document.getElementById('actions-chevron');
+                const collapsed = localStorage.getItem('actionsCollapsed') !== '0';
+                if (collapsed) {
+                    panel.style.maxHeight = '0px';
+                    panel.style.opacity = '0';
+                    chevron.style.transform = 'rotate(-90deg)';
+                } else {
+                    panel.style.maxHeight = panel.scrollHeight + 'px';
+                    panel.style.opacity = '1';
+                }
+            })();
 
             themeToggleBtn.addEventListener('click', function() {
                 themeToggleDarkIcon.classList.toggle('hidden');

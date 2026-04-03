@@ -209,6 +209,12 @@ def upload_file():
             new_transactions = []
             skipped_duplicates = 0
             errors_count = 0
+
+            inv_income_cat_id = None
+            if account.account_type == 'brokerage':
+                inv_cat = Category.query.filter_by(name='Investment Income').first()
+                inv_income_cat_id = inv_cat.id if inv_cat else uncat_id
+
             for idx, row in df.iterrows():
                 try:
                     dvals = row.get('Date')
@@ -233,6 +239,11 @@ def upload_file():
                         continue
                     
                     entity, cat_id = find_or_create_entity(desc, amount, uncat_id)
+
+                    if inv_income_cat_id:
+                        cat_id = inv_income_cat_id
+                        entity.category_id = inv_income_cat_id
+                        entity.is_auto_created = False
                     
                     new_transactions.append(Transaction(date=date_val, original_description=desc, amount=amount, entity_id=entity.id, category_id=cat_id, account_id=account.id))
                     added += 1
@@ -608,7 +619,11 @@ def categorize():
     year = request.args.get('year', '')
     month = request.args.get('month', '')
     uncat_category = Category.query.filter_by(name='Uncategorized').first()
-    q = Transaction.query.join(Entity).filter(Transaction.is_deleted == False)
+    brokerage_ids = db.session.query(Account.id).filter(Account.account_type == 'brokerage').subquery()
+    q = Transaction.query.join(Entity).filter(
+        Transaction.is_deleted == False,
+        ~Transaction.account_id.in_(brokerage_ids)
+    )
     
     if not srch and uncat_category: 
         q = q.filter(Transaction.category_id == uncat_category.id)

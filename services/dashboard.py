@@ -106,7 +106,11 @@ class DashboardService:
         net_worth = 0.0
         balances = {}
 
-        uncat = Transaction.query.join(Entity).filter(Entity.is_auto_created == True, Transaction.is_deleted == False).count()
+        uncat = Transaction.query.join(Entity).filter(
+            Entity.is_auto_created == True,
+            Transaction.is_deleted == False,
+            Transaction.account_id.notin_(self.brokerage_account_ids) if self.brokerage_account_ids else True
+        ).count()
         dup_count = 0
         return {
             'start_date': start,
@@ -141,12 +145,15 @@ class DashboardService:
         anns = [{'x': k, 'y': 1.02, 'xref': 'x', 'yref': 'paper', 'text': "📍 " + "<br>📍 ".join(v), 'showarrow': False, 'xanchor': 'center', 'yanchor': 'bottom', 'font': {'size': 10, 'color': '#4b5563'}, 'align': 'center'} for k, v in events_map.items()]
         return shapes, anns
 
-    def _group_transactions(self, txs, start, end):
+    def _group_transactions(self, txs, start, end, force_monthly=False):
         """Performance: Group transactions by period key once (O(N)) instead of filtering in loops (O(N^2))."""
         groups = {}
         for t in txs:
             if start <= t.date <= end:
-                key = self._get_period_key(t.date).strftime('%Y-%m-%d')
+                if force_monthly:
+                    key = t.date.replace(day=1).strftime('%Y-%m-%d')
+                else:
+                    key = self._get_period_key(t.date).strftime('%Y-%m-%d')
                 if key not in groups: groups[key] = []
                 groups[key].append(t)
         return groups
@@ -251,24 +258,25 @@ class DashboardService:
         monthly_period_strs = [p.strftime('%Y-%m-%d') for p in monthly_periods]
 
         grouped_core = self._group_transactions(self.core_transactions, start_date, end_date)
-        grouped_core_monthly = self._group_transactions(self.core_transactions, monthly_start, monthly_end)
+        grouped_core_monthly = self._group_transactions(self.core_transactions, monthly_start, monthly_end, force_monthly=True)
 
         shapes, anns = self._get_event_overlays(start_date, end_date)
 
         return {
-            'chart_income_vs_expense': self._chart_income_vs_expense(monthly_periods, monthly_period_strs, grouped_core_monthly, shapes, anns),
+            'chart_income_vs_expense': self._chart_income_vs_expense(periods, period_strs, grouped_core, shapes, anns),
             'chart_savings': self._chart_savings(periods, period_strs, grouped_core, shapes, anns),
             'chart_cash_flow': self._chart_cash_flow(periods, period_strs, grouped_core, shapes, anns),
             'chart_core_operating': self._chart_core_operating(periods, period_strs, grouped_core, shapes, anns),
             'chart_groceries': self._chart_groceries(periods, period_strs, grouped_core, shapes, anns),
-            'chart_expense_broad': self._chart_expense_broad(monthly_periods, monthly_period_strs, grouped_core_monthly, shapes, anns),
+            'chart_expense_broad': self._chart_expense_broad(periods, period_strs, grouped_core, shapes, anns),
             'chart_core_summary': self._chart_core_summary(periods, period_strs, grouped_core, shapes, anns),
             'chart_top_payees': self._chart_top_payees(self.core_transactions, start_date),
             'chart_yoy': self._chart_yoy(),
             'chart_core_breakdown': self._chart_core_breakdown(periods, period_strs, grouped_core, shapes, anns),
             'chart_hsa_activity': self._chart_hsa_activity(periods, period_strs, start_date, end_date),
             'chart_eat_out_patterns': self._chart_eat_out_patterns(start_date, end_date),
-            'chart_brokerage_income': self._chart_brokerage_income(periods, period_strs, start_date, end_date)
+            'chart_brokerage_income': self._chart_brokerage_income(periods, period_strs, start_date, end_date),
+            'chart_passive_coverage': self._chart_passive_income_coverage(periods, period_strs, start_date, end_date),
         }
 
     def _is_core_expense(self, t):
@@ -311,18 +319,18 @@ class DashboardService:
             title += f" | All-Time Total: ${all_time_total:,.0f}"
 
         FIXED_COLORS = {
-            'BND':     '#3b82f6',  # blue
-            'CD':      '#f97316',  # orange
-            'FXNAX':   '#8b5cf6',  # violet
-            'FSBC':    '#ec4899',  # pink
-            'HMBGX':   '#eab308',  # yellow
-            'HMBD':    '#14b8a6',  # teal
-            'SPAXX':   '#ef4444',  # red
-            'SCHD':    '#84cc16',  # lime
-            'US Bond': '#10b981',  # emerald
-            'VTI':     '#a855f7',  # purple
-            'VOO':     '#0ea5e9',  # sky blue
-            'VXUS':    '#fb923c',  # amber-orange
+            'BND':     '#3b82f6',
+            'CD':      '#f97316',
+            'FXNAX':   '#8b5cf6',
+            'FSBC':    '#ec4899',
+            'HMBGX':   '#eab308',
+            'HMBD':    '#14b8a6',
+            'SPAXX':   '#ef4444',
+            'SCHD':    '#84cc16',
+            'US Bond': '#10b981',
+            'VTI':     '#a855f7',
+            'VOO':     '#0ea5e9',
+            'VXUS':    '#fb923c',
         }
         FALLBACK = [
             '#f43f5e', '#22c55e', '#d946ef', '#2dd4bf',
@@ -557,12 +565,13 @@ class DashboardService:
         colors = []
         hover_texts = []
 
+        SAVINGS_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
             p_txs = [t for t in p_txs if t.category.name != EXCLUDED_CAT]
 
             total_income = sum(t.amount for t in p_txs if t.amount > 0)
-            total_expenses = abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.name != 'Investment'))
+            total_expenses = abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.name not in SAVINGS_CATS))
             net_savings = total_income - total_expenses
 
             if total_income > 0:
@@ -610,6 +619,51 @@ class DashboardService:
             margin=self.margin_events,
             showlegend=True,
             legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+            **self.base_layout
+        )
+        return to_json(fig, pretty=True)
+
+    def _chart_passive_income_coverage(self, periods, period_strs, start_date, end_date):
+        """Brokerage passive income as % of core monthly expenses."""
+        brok_by_period = {}
+        for t in self.brokerage_transactions:
+            if start_date <= t.date <= end_date and t.amount > 0:
+                key = self._get_period_key(t.date).strftime('%Y-%m-%d')
+                brok_by_period[key] = brok_by_period.get(key, 0.0) + float(t.amount)
+
+        SAVINGS_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
+        core_exp_by_period = {}
+        for t in self.core_transactions:
+            if start_date <= t.date <= end_date and t.amount < 0 and t.category.name != EXCLUDED_CAT and t.category.name not in SAVINGS_CATS:
+                key = self._get_period_key(t.date).strftime('%Y-%m-%d')
+                core_exp_by_period[key] = core_exp_by_period.get(key, 0.0) + abs(float(t.amount))
+
+        pcts, colors, hover = [], [], []
+        for p_str in period_strs:
+            income = brok_by_period.get(p_str, 0.0)
+            expenses = core_exp_by_period.get(p_str, 0.0)
+            pct = round(income / expenses * 100, 1) if expenses > 0 else 0.0
+            pcts.append(pct)
+            colors.append('#10b981' if pct >= 100 else '#3b82f6' if pct >= 50 else '#f97316')
+            hover.append(f"Coverage: {pct:.1f}%<br>Passive Income: ${income:,.2f}<br>Core Expenses: ${expenses:,.2f}")
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=period_strs, y=pcts,
+            marker_color=colors,
+            text=[f'{p:.1f}%' for p in pcts],
+            textposition='outside',
+            hoverinfo='text',
+            hovertext=hover,
+            name='Coverage %'
+        ))
+        fig.add_hline(y=100, line_dash='dash', line_color='#ef4444', line_width=1.5,
+                      annotation_text='100% covered', annotation_position='right')
+        fig.update_layout(
+            title='Passive Income Coverage Ratio (Brokerage Income / Core Expenses)',
+            yaxis=dict(title='Coverage (%)', ticksuffix='%', rangemode='tozero'),
+            xaxis=self.xaxis_date,
+            margin=self.margin_events,
             **self.base_layout
         )
         return to_json(fig, pretty=True)
