@@ -72,9 +72,33 @@
 
         <div class="mb-4 flex gap-2 flex-wrap">
             <button onclick="showAddModal()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md"><i class="fa-solid fa-plus mr-2"></i>Add New Entity</button>
-            <button onclick="rematchAll()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md"><i class="fa-solid fa-sync mr-2"></i>Re-match All</button>
-            <button onclick="syncCategories()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-md"><i class="fa-solid fa-arrows-rotate mr-2"></i>Sync Categories</button>
-            <button onclick="cleanUpOrphans()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md"><i class="fa-solid fa-trash mr-2"></i>Clean Up Orphans</button>
+            <div class="relative group">
+                <button onclick="rematchAll()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md"><i class="fa-solid fa-sync mr-2"></i>Re-match All</button>
+                <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 w-64">
+                    <div class="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg text-center">
+                        Re-runs all entity match patterns against every transaction. Useful after adding or editing patterns to apply them retroactively.
+                        <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="relative group">
+                <button onclick="syncCategories()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-md"><i class="fa-solid fa-arrows-rotate mr-2"></i>Sync Categories</button>
+                <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 w-64">
+                    <div class="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg text-center">
+                        Updates each entity's category to match the most common category found across its transactions. Fixes entities whose category drifted out of sync.
+                        <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="relative group">
+                <button onclick="cleanUpOrphans()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md"><i class="fa-solid fa-trash mr-2"></i>Clean Up Orphans</button>
+                <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 w-64">
+                    <div class="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg text-center">
+                        Deletes entities that have no transactions linked to them and no match patterns. Keeps the list clean of unused auto-created stubs.
+                        <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="bg-white dark:bg-gray-800 shadow-xl overflow-hidden rounded-lg">

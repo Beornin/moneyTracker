@@ -419,11 +419,11 @@ class DashboardService:
 
         fig = go.Figure()
         fig.add_trace(go.Bar(name='Investment Withdrawals', x=period_strs, y=investment_withdrawals, marker_color='#ef4444'))
-        fig.add_trace(go.Bar(name='Regular Income', x=period_strs, y=regular_inc, marker_color='#10b981'))
+        fig.add_trace(go.Bar(name='Income', x=period_strs, y=regular_inc, marker_color='#10b981'))
         fig.add_trace(go.Bar(name='Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
         fig.add_trace(go.Scatter(name='Cumulative Surplus', x=period_strs, y=cumulative_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
         fig.update_layout(
-            title='Building Wealth (Excl. Investments)',
+            title='In with Investments vs Out w/o Investments',
             barmode='group',
             yaxis=dict(title='$', tickformat="$,.0f"),
             xaxis=self.xaxis_date,
@@ -496,10 +496,10 @@ class DashboardService:
             cumulative_net.append(cumulative_surplus)
 
         fig = go.Figure()
-        fig.add_trace(go.Bar(name='Core Income', x=period_strs, y=c_inc, marker_color='#10b981'))
-        fig.add_trace(go.Bar(name='Core Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
+        fig.add_trace(go.Bar(name='Full Income', x=period_strs, y=c_inc, marker_color='#10b981'))
+        fig.add_trace(go.Bar(name='Full Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
         fig.add_trace(go.Scatter(name='Cumulative Surplus', x=period_strs, y=cumulative_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
-        fig.update_layout(title='Core Operating Performance', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
+        fig.update_layout(title='Full Income vs Full Expense', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_groceries(self, periods, period_strs, grouped_txs, shapes, anns):
@@ -508,8 +508,10 @@ class DashboardService:
             p_txs = grouped_txs.get(p_str, [])
             groc.append(float(abs(sum(t.amount for t in p_txs if t.category.name == 'Groceries'))))
             dine.append(float(abs(sum(t.amount for t in p_txs if t.category.name == 'Eat Out'))))
-        avg_groc = sum(groc) / len(groc) if len(groc) > 0 else 0
-        avg_dine = sum(dine) / len(dine) if len(dine) > 0 else 0
+        nonzero_groc = [v for v in groc if v > 0]
+        nonzero_dine = [v for v in dine if v > 0]
+        avg_groc = sum(nonzero_groc) / len(nonzero_groc) if nonzero_groc else 0
+        avg_dine = sum(nonzero_dine) / len(nonzero_dine) if nonzero_dine else 0
         traces = [
             go.Bar(name='Groceries', x=period_strs, y=groc, marker_color='#10b981'),
             go.Bar(name='Eat Out', x=period_strs, y=dine, marker_color='#f59e0b'),
