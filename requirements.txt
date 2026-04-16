@@ -4,5 +4,6 @@ psycopg2-binary
 pandas
 plotly
 pdfplumber
+numpy
 gunicorn
 python-dotenv

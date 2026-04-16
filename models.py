@@ -110,6 +110,107 @@ class BudgetLineItem(db.Model, TimestampMixin):
         db.Index('idx_bli_budget', 'budget_id'),
     )
 
+# ── Retirement Planner Models ──────────────────────────────────────────
+
+class RetirementScenario(db.Model, TimestampMixin):
+    """Household-level retirement scenario with shared assumptions."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    filing_status = db.Column(db.String(10), nullable=False, default='mfj')
+    life_expectancy_age = db.Column(db.Integer, nullable=False, default=90)
+    growth_rate_mean = db.Column(db.Float, nullable=False, default=0.07)
+    growth_rate_stddev = db.Column(db.Float, nullable=False, default=0.15)
+    inflation_rate = db.Column(db.Float, nullable=False, default=0.03)
+    notes = db.Column(db.Text, nullable=True)
+
+    people = db.relationship('RetirementPerson', backref='scenario', lazy=True, cascade='all, delete-orphan')
+    income_sources = db.relationship('RetirementIncomeSource', backref='scenario', lazy=True, cascade='all, delete-orphan')
+    expense_items = db.relationship('RetirementExpenseItem', backref='scenario', lazy=True, cascade='all, delete-orphan')
+
+
+class RetirementPerson(db.Model, TimestampMixin):
+    """Per-person demographics and SS info within a scenario."""
+    id = db.Column(db.Integer, primary_key=True)
+    scenario_id = db.Column(db.Integer, db.ForeignKey('retirement_scenario.id'), nullable=False)
+    label = db.Column(db.String(100), nullable=False)
+    date_of_birth = db.Column(db.Date, nullable=False)
+    retirement_age = db.Column(db.Integer, nullable=False, default=65)
+    ss_monthly_benefit = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+    ss_start_age = db.Column(db.Integer, nullable=False, default=67)
+
+    accounts = db.relationship('RetirementAccount', backref='person', lazy=True, cascade='all, delete-orphan')
+
+    @property
+    def current_age(self):
+        from datetime import date
+        today = date.today()
+        return today.year - self.date_of_birth.year - (
+            (today.month, today.day) < (self.date_of_birth.month, self.date_of_birth.day)
+        )
+
+    __table_args__ = (
+        db.Index('idx_rp_scenario', 'scenario_id'),
+    )
+
+
+class RetirementAccount(db.Model, TimestampMixin):
+    """Flexible investment account tied to a person."""
+    id = db.Column(db.Integer, primary_key=True)
+    person_id = db.Column(db.Integer, db.ForeignKey('retirement_person.id'), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    tax_type = db.Column(db.String(20), nullable=False, default='traditional')
+    balance = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    monthly_contribution = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+    growth_override = db.Column(db.Float, nullable=True)
+
+    __table_args__ = (
+        db.Index('idx_ra_person', 'person_id'),
+    )
+
+
+class RetirementIncomeSource(db.Model, TimestampMixin):
+    """Household income stream active during retirement (non-portfolio)."""
+    id = db.Column(db.Integer, primary_key=True)
+    scenario_id = db.Column(db.Integer, db.ForeignKey('retirement_scenario.id'), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    source_type = db.Column(db.String(20), nullable=False, default='other')
+    annual_amount = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+    start_age = db.Column(db.Integer, nullable=False, default=65)
+    inflation_adjusted = db.Column(db.Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        db.Index('idx_ris_scenario', 'scenario_id'),
+    )
+
+
+class RetirementExpenseItem(db.Model, TimestampMixin):
+    """Expected monthly retirement expense line item."""
+    id = db.Column(db.Integer, primary_key=True)
+    scenario_id = db.Column(db.Integer, db.ForeignKey('retirement_scenario.id'), nullable=False)
+    label = db.Column(db.String(200), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)
+    monthly_amount = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+    inflation_adjusted = db.Column(db.Boolean, nullable=False, default=True)
+
+    category = db.relationship('Category', lazy=True)
+
+    __table_args__ = (
+        db.Index('idx_rei_scenario', 'scenario_id'),
+    )
+
+
+class PortfolioSnapshot(db.Model, TimestampMixin):
+    """Point-in-time actual balance recording for any account."""
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    account_label = db.Column(db.String(200), nullable=False)
+    balance = db.Column(db.Numeric(12, 2), nullable=False)
+
+    __table_args__ = (
+        db.Index('idx_ps_date_account', 'date', 'account_label'),
+    )
+
+
 def create_tables():
     db.create_all()
 

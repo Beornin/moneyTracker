@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retirement Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else { document.documentElement.classList.remove('dark'); }
+    </script>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
+<div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-5xl">
+
+    <div class="flex items-center justify-between mb-6 border-b dark:border-gray-700 pb-4">
+        <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white">
+            <i class="fa-solid fa-umbrella-beach mr-3 text-emerald-500"></i>Retirement Planner
+        </h1>
+        <div class="flex items-center gap-3">
+            <a href="{{ url_for('retirement.snapshots') }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm">
+                <i class="fa-solid fa-camera mr-2"></i>Portfolio Snapshots
+            </a>
+            <a href="{{ url_for('index') }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm">
+                <i class="fa-solid fa-arrow-left mr-2"></i>Dashboard
+            </a>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="space-y-2 mb-6">
+                {% for category, message in messages %}
+                    <div class="px-4 py-3 rounded-lg text-sm font-medium
+                        {% if category == 'success' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                        {% elif category == 'danger' %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200
+                        {% else %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Scenarios -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        {% for sc in scenarios %}
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+            <div class="flex items-start justify-between mb-3">
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white">{{ sc.name }}</h2>
+                <span class="text-xs text-gray-400 dark:text-gray-500">{{ sc.filing_status.upper() }}</span>
+            </div>
+            <div class="text-sm text-gray-600 dark:text-gray-400 space-y-1 mb-4">
+                <p><i class="fa-solid fa-users mr-2 w-5 text-center"></i>{{ sc.people|length }} person{{ 's' if sc.people|length != 1 }}</p>
+                <p><i class="fa-solid fa-chart-line mr-2 w-5 text-center"></i>{{ (sc.growth_rate_mean * 100)|round(1) }}% mean return</p>
+                <p><i class="fa-solid fa-heart-pulse mr-2 w-5 text-center"></i>Plan to age {{ sc.life_expectancy_age }}</p>
+            </div>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mb-4">Updated {{ sc.updated_at.strftime('%b %d, %Y') }}</p>
+            <div class="flex gap-2">
+                <a href="{{ url_for('retirement.edit_scenario', scenario_id=sc.id) }}" class="flex-1 text-center px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
+                    <i class="fa-solid fa-pen-to-square mr-1"></i>Edit
+                </a>
+                <a href="{{ url_for('retirement.results', scenario_id=sc.id) }}" class="flex-1 text-center px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 transition-colors">
+                    <i class="fa-solid fa-play mr-1"></i>Results
+                </a>
+                <form method="POST" action="{{ url_for('retirement.delete_scenario', scenario_id=sc.id) }}" onsubmit="return confirm('Delete this scenario?')">
+                    <button class="px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+
+        <!-- New Scenario Card -->
+        <a href="{{ url_for('retirement.new_scenario') }}" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-emerald-500 dark:hover:border-emerald-500 transition-colors flex flex-col items-center justify-center min-h-[200px] group">
+            <i class="fa-solid fa-plus text-4xl text-gray-400 dark:text-gray-500 group-hover:text-emerald-500 transition-colors mb-3"></i>
+            <span class="text-gray-500 dark:text-gray-400 font-medium group-hover:text-emerald-500 transition-colors">New Scenario</span>
+        </a>
+    </div>
+
+</div>
+</body>
+</html>

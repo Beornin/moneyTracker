@@ -52,7 +52,7 @@ def find_or_create_entity(description, amount, uncat_id):
         is_auto_created=True
     )
     db.session.add(new_entity)
-    db.session.commit()
+    db.session.flush()
 
     return new_entity, uncat_id
 

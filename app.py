@@ -2,8 +2,11 @@
 import calendar
 import io
 import json
+import shutil
+import subprocess
 import pandas as pd
 from datetime import datetime, date, timedelta
+from urllib.parse import urlparse
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort
 from sqlalchemy import func, extract, case, or_, text, exists
 from sqlalchemy.orm import joinedload
@@ -15,6 +18,7 @@ from models import db, Account, StatementRecord, Category, Entity, Transaction, 
 from utils.helpers import get_uncategorized_id, try_parse_date, find_or_create_entity, update_entity_patterns, apply_entity_to_transactions, auto_match_transactions_to_entity, rematch_all_entities, get_monthly_summary_direct
 from utils.pdf_parsers import parse_chase_pdf, parse_wellsfargo_pdf, parse_hsa_pdf, parse_fidelity_csv
 from services.dashboard import DashboardService
+from routes.retirement import retirement_bp
 
 load_dotenv()
 
@@ -24,6 +28,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.urandom(24)
 
 db.init_app(app)
+app.register_blueprint(retirement_bp)
 
 
 # --- AI INSIGHTS LOGIC ---
@@ -216,6 +221,7 @@ def upload_file():
                 inv_income_cat_id = inv_cat.id if inv_cat else uncat_id
 
             for idx, row in df.iterrows():
+                sp = db.session.begin_nested()
                 try:
                     dvals = row.get('Date')
                     date_val = pd.to_datetime(dvals).date() if isinstance(dvals, str) else dvals
@@ -236,6 +242,7 @@ def upload_file():
                     
                     if duplicate:
                         skipped_duplicates += 1
+                        sp.rollback()
                         continue
                     
                     entity, cat_id = find_or_create_entity(desc, amount, uncat_id)
@@ -247,7 +254,9 @@ def upload_file():
                     
                     new_transactions.append(Transaction(date=date_val, original_description=desc, amount=amount, entity_id=entity.id, category_id=cat_id, account_id=account.id))
                     added += 1
+                    sp.commit()
                 except Exception as e:
+                    sp.rollback()
                     errors_count += 1
                     flash(f"Row {idx}: Error processing transaction - {str(e)[:100]}", "warning")
                     continue
@@ -591,7 +600,7 @@ def categorize():
                             db.session.add(entity)
                             flash_msg = f"Created entity '{disp}'."
                         
-                        db.session.commit()
+                        db.session.flush()
                         
                         # Update this transaction
                         t.entity_id = entity.id
@@ -1610,6 +1619,68 @@ def api_date_range():
     min_date = db.session.query(func.min(Transaction.date)).scalar()
     max_date = db.session.query(func.max(Transaction.date)).scalar()
     return jsonify({'min_date': min_date.strftime('%Y-%m-%d') if min_date else date.today().strftime('%Y-%m-%d'), 'max_date': max_date.strftime('%Y-%m-%d') if max_date else date.today().strftime('%Y-%m-%d')})
+
+# ── Database Backup ───────────────────────────────────────────────────
+
+BACKUP_DIR = r'D:\Documents\Database Backups'
+
+PG_DUMP_CANDIDATES = [
+    'pg_dump',
+    r'C:\Program Files\PostgreSQL\17\bin\pg_dump.exe',
+    r'C:\Program Files\PostgreSQL\16\bin\pg_dump.exe',
+    r'C:\Program Files\PostgreSQL\15\bin\pg_dump.exe',
+    r'C:\Program Files\PostgreSQL\14\bin\pg_dump.exe',
+]
+
+
+@app.route('/backup-db', methods=['POST'])
+def backup_db():
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+
+    pg_dump = shutil.which('pg_dump')
+    if not pg_dump:
+        for candidate in PG_DUMP_CANDIDATES[1:]:
+            if os.path.isfile(candidate):
+                pg_dump = candidate
+                break
+    if not pg_dump:
+        flash('pg_dump not found. Add PostgreSQL bin to your PATH.', 'danger')
+        return redirect(request.referrer or url_for('index'))
+
+    parsed = urlparse(app.config['SQLALCHEMY_DATABASE_URI'])
+    now = datetime.now()
+    dated_dir = os.path.join(BACKUP_DIR, now.strftime('%Y-%m-%d'))
+    os.makedirs(dated_dir, exist_ok=True)
+    backup_file = os.path.join(dated_dir, f'budget_db_{now.strftime("%H-%M-%S")}.dump')
+
+    env = os.environ.copy()
+    if parsed.password:
+        env['PGPASSWORD'] = parsed.password
+
+    cmd = [
+        pg_dump,
+        '-h', parsed.hostname or 'localhost',
+        '-p', str(parsed.port or 5432),
+        '-U', parsed.username or 'postgres',
+        '-F', 'c',
+        '-f', backup_file,
+        parsed.path.lstrip('/'),
+    ]
+
+    try:
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            size_kb = os.path.getsize(backup_file) // 1024
+            flash(f'Backup saved: {backup_file} ({size_kb:,} KB)', 'success')
+        else:
+            flash(f'Backup failed: {result.stderr.strip()}', 'danger')
+    except subprocess.TimeoutExpired:
+        flash('Backup timed out after 5 minutes.', 'danger')
+    except Exception as e:
+        flash(f'Backup error: {e}', 'danger')
+
+    return redirect(request.referrer or url_for('index'))
+
 
 if __name__ == '__main__':
     with app.app_context(): create_tables()

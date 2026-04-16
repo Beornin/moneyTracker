@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ scenario.name }} — Simulation Results</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else { document.documentElement.classList.remove('dark'); }
+    </script>
+    <style>
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #10b981; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
+<div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-[95%]">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6 border-b dark:border-gray-700 pb-4">
+        <h1 class="text-2xl font-extrabold text-gray-900 dark:text-white">
+            <i class="fa-solid fa-chart-line mr-3 text-emerald-500"></i>{{ scenario.name }}
+        </h1>
+        <div class="flex items-center gap-3">
+            <select id="sim-count" class="px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                <option value="500">500 Simulations</option>
+                <option value="1000" selected>1,000 Simulations</option>
+                <option value="5000">5,000 Simulations</option>
+            </select>
+            <button id="run-btn" class="px-5 py-2 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition-colors">
+                <i class="fa-solid fa-play mr-2"></i>Run Monte Carlo
+            </button>
+            <a href="{{ url_for('retirement.edit_scenario', scenario_id=scenario.id) }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm">
+                <i class="fa-solid fa-pen-to-square mr-2"></i>Edit
+            </a>
+            <a href="{{ url_for('retirement.index') }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm">
+                <i class="fa-solid fa-arrow-left mr-2"></i>Back
+            </a>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="hidden flex flex-col items-center justify-center py-20">
+        <div class="loader mb-4"></div>
+        <p class="text-gray-500 dark:text-gray-400 text-lg">Running <span id="loading-count">1,000</span> market simulations...</p>
+    </div>
+
+    <!-- Results Container -->
+    <div id="results" class="hidden">
+
+        <!-- Success Gauge -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+            <div id="gauge-card" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center col-span-1">
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Probability of Success</p>
+                <p id="success-rate" class="text-6xl font-black mb-2">—%</p>
+                <p class="text-xs text-gray-400 dark:text-gray-500">Money lasts to age {{ scenario.life_expectancy_age }}</p>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center">
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Median Final Balance</p>
+                <p id="final-balance" class="text-3xl font-bold text-gray-900 dark:text-white">—</p>
+                <p class="text-xs text-gray-400 dark:text-gray-500">At age {{ scenario.life_expectancy_age }}</p>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center">
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Simulations Run</p>
+                <p id="sim-count-display" class="text-3xl font-bold text-gray-900 dark:text-white">—</p>
+                <p class="text-xs text-gray-400 dark:text-gray-500">Monte Carlo paths</p>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center">
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Years Modeled</p>
+                <p id="years-display" class="text-3xl font-bold text-gray-900 dark:text-white">—</p>
+                <p class="text-xs text-gray-400 dark:text-gray-500" id="age-range">—</p>
+            </div>
+        </div>
+
+        <!-- Charts Row 1: Accumulation + Fan Chart -->
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 border border-gray-200 dark:border-gray-700">
+                <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2"><i class="fa-solid fa-arrow-trend-up mr-2 text-blue-500"></i>Accumulation Projection (Deterministic)</h3>
+                <div id="chart-accumulation" style="height: 400px;"></div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 border border-gray-200 dark:border-gray-700">
+                <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2"><i class="fa-solid fa-fan mr-2 text-emerald-500"></i>Portfolio Balance — Monte Carlo Fan Chart</h3>
+                <div id="chart-fan" style="height: 400px;"></div>
+            </div>
+        </div>
+
+        <!-- Charts Row 2: Income Breakdown + Tax Rate -->
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 border border-gray-200 dark:border-gray-700">
+                <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2"><i class="fa-solid fa-layer-group mr-2 text-amber-500"></i>Annual Income Breakdown (Reference Run)</h3>
+                <div id="chart-income" style="height: 400px;"></div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 border border-gray-200 dark:border-gray-700">
+                <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2"><i class="fa-solid fa-percent mr-2 text-red-500"></i>Effective Tax Rate Trend</h3>
+                <div id="chart-tax" style="height: 400px;"></div>
+            </div>
+        </div>
+
+        <!-- Year-by-Year Tax Detail Table -->
+        <div id="tax-table-section" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
+            <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">
+                <i class="fa-solid fa-table mr-2 text-indigo-500"></i>Year-by-Year Tax Detail (Median Reference Run)
+            </h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs text-right">
+                    <thead>
+                        <tr class="text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+                            <th class="text-left py-2 px-2">Age</th>
+                            <th class="py-2 px-2">Social Security</th>
+                            <th class="py-2 px-2">Ordinary Income</th>
+                            <th class="py-2 px-2">LTCG / Div</th>
+                            <th class="py-2 px-2">Portfolio Draw</th>
+                            <th class="py-2 px-2">Total Expenses</th>
+                            <th class="py-2 px-2">Federal Tax</th>
+                            <th class="py-2 px-2">Eff. Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tax-table-body" class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 2025 Tax Bracket Reference -->
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700">
+                <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">
+                    <i class="fa-solid fa-scale-balanced mr-2 text-blue-500"></i>2025 Federal Ordinary Income Brackets
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div>
+                        <p class="font-semibold text-gray-600 dark:text-gray-400 mb-2">Married Filing Jointly</p>
+                        <table class="w-full text-right">
+                            <thead><tr class="text-gray-400 dark:text-gray-500 border-b dark:border-gray-700"><th class="text-left py-1">Rate</th><th class="py-1">Up to</th><th class="py-1">Std. Ded.</th></tr></thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                                <tr><td class="text-left py-1 font-medium text-green-600">10%</td><td class="py-1">$23,850</td><td class="py-1 text-gray-400" rowspan="7">$30,000</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-green-500">12%</td><td class="py-1">$96,950</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-yellow-500">22%</td><td class="py-1">$206,700</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-yellow-600">24%</td><td class="py-1">$394,600</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-orange-500">32%</td><td class="py-1">$501,050</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-orange-600">35%</td><td class="py-1">$751,600</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-red-600">37%</td><td class="py-1">Above</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-gray-600 dark:text-gray-400 mb-2">Single</p>
+                        <table class="w-full text-right">
+                            <thead><tr class="text-gray-400 dark:text-gray-500 border-b dark:border-gray-700"><th class="text-left py-1">Rate</th><th class="py-1">Up to</th><th class="py-1">Std. Ded.</th></tr></thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                                <tr><td class="text-left py-1 font-medium text-green-600">10%</td><td class="py-1">$11,925</td><td class="py-1 text-gray-400" rowspan="7">$15,000</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-green-500">12%</td><td class="py-1">$48,475</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-yellow-500">22%</td><td class="py-1">$103,350</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-yellow-600">24%</td><td class="py-1">$197,300</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-orange-500">32%</td><td class="py-1">$250,525</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-orange-600">35%</td><td class="py-1">$626,350</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-red-600">37%</td><td class="py-1">Above</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-3">+$1,600 extra deduction per person age 65+ (MFJ) / +$2,000 (Single)</p>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700">
+                <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">
+                    <i class="fa-solid fa-chart-simple mr-2 text-emerald-500"></i>2025 LTCG / Qualified Dividend Rates &amp; Social Security Taxation
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div>
+                        <p class="font-semibold text-gray-600 dark:text-gray-400 mb-2">LTCG / Qualified Dividends</p>
+                        <table class="w-full text-right">
+                            <thead><tr class="text-gray-400 dark:text-gray-500 border-b dark:border-gray-700"><th class="text-left py-1">Rate</th><th class="py-1">MFJ up to</th><th class="py-1">Single up to</th></tr></thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                                <tr><td class="text-left py-1 font-medium text-green-600">0%</td><td class="py-1">$96,700</td><td class="py-1">$48,350</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-yellow-500">15%</td><td class="py-1">$600,050</td><td class="py-1">$533,400</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-red-500">20%</td><td class="py-1">Above</td><td class="py-1">Above</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-gray-600 dark:text-gray-400 mb-2">Social Security Taxability</p>
+                        <p class="text-gray-500 dark:text-gray-400 mb-1">Based on <em>combined income</em> = AGI + ½ SS</p>
+                        <table class="w-full text-right">
+                            <thead><tr class="text-gray-400 dark:text-gray-500 border-b dark:border-gray-700"><th class="text-left py-1">% Taxable</th><th class="py-1">MFJ above</th><th class="py-1">Single above</th></tr></thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                                <tr><td class="text-left py-1 font-medium text-green-600">0%</td><td class="py-1">—</td><td class="py-1">—</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-yellow-500">50%</td><td class="py-1">$32,000</td><td class="py-1">$25,000</td></tr>
+                                <tr><td class="text-left py-1 font-medium text-red-500">85%</td><td class="py-1">$44,000</td><td class="py-1">$34,000</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="flex flex-col items-center justify-center py-20 text-center">
+        <i class="fa-solid fa-chart-line text-6xl text-gray-300 dark:text-gray-600 mb-4"></i>
+        <p class="text-xl text-gray-500 dark:text-gray-400 mb-2">Click <strong>Run Monte Carlo</strong> to simulate</p>
+        <p class="text-sm text-gray-400 dark:text-gray-500">This will project your portfolio through {{ scenario.life_expectancy_age - (scenario.people[0].current_age if scenario.people else 30) }} years of accumulation + retirement</p>
+    </div>
+
+</div>
+
+<script>
+const SCENARIO_ID = {{ scenario.id }};
+const isDark = document.documentElement.classList.contains('dark');
+const plotBg = isDark ? '#1f2937' : '#ffffff';
+const paperBg = isDark ? '#1f2937' : '#ffffff';
+const gridColor = isDark ? '#374151' : '#e5e7eb';
+const textColor = isDark ? '#d1d5db' : '#374151';
+
+const baseLayout = {
+    paper_bgcolor: paperBg,
+    plot_bgcolor: plotBg,
+    font: { color: textColor, size: 12 },
+    xaxis: { gridcolor: gridColor },
+    yaxis: { gridcolor: gridColor, tickformat: '$,.0f' },
+    margin: { l: 60, r: 30, t: 30, b: 50 },
+    showlegend: true,
+    legend: { orientation: 'h', y: -0.2, x: 0.5, xanchor: 'center' },
+};
+
+function formatMoney(val) {
+    if (val >= 1e6) return '$' + (val / 1e6).toFixed(1) + 'M';
+    if (val >= 1e3) return '$' + (val / 1e3).toFixed(0) + 'K';
+    return '$' + val.toFixed(0);
+}
+
+document.getElementById('run-btn').addEventListener('click', async () => {
+    const nSims = document.getElementById('sim-count').value;
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('results').classList.add('hidden');
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('loading-count').textContent = parseInt(nSims).toLocaleString();
+
+    const formData = new FormData();
+    formData.append('n_simulations', nSims);
+
+    try {
+        const resp = await fetch(`/retirement/scenario/${SCENARIO_ID}/simulate`, { method: 'POST', body: formData });
+        const data = await resp.json();
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('results').classList.remove('hidden');
+        renderResults(data);
+    } catch (err) {
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('empty-state').classList.remove('hidden');
+        alert('Simulation error: ' + err.message);
+    }
+});
+
+function renderResults(data) {
+    const sim = data.simulation;
+    const acc = data.accumulation;
+
+    // ── Summary Cards ──
+    const rate = sim.success_rate;
+    const rateEl = document.getElementById('success-rate');
+    rateEl.textContent = rate.toFixed(1) + '%';
+    rateEl.className = 'text-6xl font-black mb-2 ' + (rate >= 90 ? 'text-emerald-500' : rate >= 75 ? 'text-amber-500' : 'text-red-500');
+    document.getElementById('gauge-card').classList.remove('border-emerald-500', 'border-amber-500', 'border-red-500');
+    document.getElementById('gauge-card').classList.add(rate >= 90 ? 'border-emerald-500' : rate >= 75 ? 'border-amber-500' : 'border-red-500');
+
+    document.getElementById('final-balance').textContent = formatMoney(sim.median_final_balance);
+    document.getElementById('sim-count-display').textContent = sim.n_simulations.toLocaleString();
+    document.getElementById('years-display').textContent = sim.total_years;
+    document.getElementById('age-range').textContent = `Age ${sim.youngest_age} → ${sim.life_expectancy}`;
+
+    // ── Chart 1: Accumulation ──
+    if (acc.years.length > 0) {
+        const traces = [];
+        const typeColors = { traditional: '#6366f1', roth: '#10b981', brokerage: '#f59e0b', vul: '#8b5cf6', cash: '#6b7280' };
+        for (const [ttype, values] of Object.entries(acc.by_type)) {
+            if (values.some(v => v > 0)) {
+                traces.push({
+                    x: acc.years, y: values, name: ttype.charAt(0).toUpperCase() + ttype.slice(1),
+                    type: 'scatter', stackgroup: 'one', fillcolor: typeColors[ttype] || '#94a3b8',
+                    line: { width: 0 },
+                });
+            }
+        }
+        Plotly.newPlot('chart-accumulation', traces, {
+            ...baseLayout,
+            yaxis: { ...baseLayout.yaxis, title: 'Portfolio Value' },
+        }, { responsive: true });
+    }
+
+    // ── Chart 2: Fan Chart ──
+    const labels = sim.year_labels;
+    const retireIdx = sim.years_to_retire;
+    const fanTraces = [
+        { x: labels, y: sim.percentiles.p10, name: '10th %ile', line: { color: 'rgba(239,68,68,0.3)' }, type: 'scatter', mode: 'lines' },
+        { x: labels, y: sim.percentiles.p25, name: '25th %ile', fill: 'tonexty', fillcolor: 'rgba(239,68,68,0.1)', line: { color: 'rgba(239,68,68,0.5)' }, type: 'scatter', mode: 'lines' },
+        { x: labels, y: sim.percentiles.p50, name: 'Median', line: { color: '#10b981', width: 3 }, type: 'scatter', mode: 'lines' },
+        { x: labels, y: sim.percentiles.p75, name: '75th %ile', fill: 'tonexty', fillcolor: 'rgba(16,185,129,0.1)', line: { color: 'rgba(16,185,129,0.5)' }, type: 'scatter', mode: 'lines' },
+        { x: labels, y: sim.percentiles.p90, name: '90th %ile', fill: 'tonexty', fillcolor: 'rgba(16,185,129,0.05)', line: { color: 'rgba(16,185,129,0.3)' }, type: 'scatter', mode: 'lines' },
+    ];
+    const fanShapes = retireIdx > 0 ? [{
+        type: 'line', x0: labels[retireIdx], x1: labels[retireIdx], y0: 0, y1: 1, yref: 'paper',
+        line: { color: '#f59e0b', width: 2, dash: 'dash' },
+    }] : [];
+    const fanAnns = retireIdx > 0 ? [{
+        x: labels[retireIdx], y: 1, yref: 'paper', text: 'Retirement', showarrow: false,
+        font: { color: '#f59e0b', size: 11 }, yanchor: 'bottom',
+    }] : [];
+    Plotly.newPlot('chart-fan', fanTraces, {
+        ...baseLayout, shapes: fanShapes, annotations: fanAnns,
+        yaxis: { ...baseLayout.yaxis, title: 'Portfolio Balance' },
+    }, { responsive: true });
+
+    // ── Chart 3: Income Breakdown ──
+    const taxData = sim.median_tax_data;
+    if (taxData.length > 0) {
+        const retYears = taxData.map(d => labels[d.year] || `Yr ${d.year}`);
+        Plotly.newPlot('chart-income', [
+            { x: retYears, y: taxData.map(d => d.ss_income), name: 'Social Security', type: 'bar', marker: { color: '#3b82f6' } },
+            { x: retYears, y: taxData.map(d => d.ordinary_income), name: 'Ordinary Income', type: 'bar', marker: { color: '#10b981' } },
+            { x: retYears, y: taxData.map(d => d.ltcg_income), name: 'LTCG / Dividends', type: 'bar', marker: { color: '#f59e0b' } },
+            { x: retYears, y: taxData.map(d => d.withdrawal), name: 'Portfolio Withdrawal', type: 'bar', marker: { color: '#8b5cf6' } },
+            { x: retYears, y: taxData.map(d => -d.tax), name: 'Federal Tax', type: 'bar', marker: { color: '#ef4444' } },
+        ], {
+            ...baseLayout, barmode: 'relative',
+            yaxis: { ...baseLayout.yaxis, title: 'Annual $' },
+        }, { responsive: true });
+
+        // ── Chart 4: Tax Rate Trend ──
+        Plotly.newPlot('chart-tax', [
+            { x: retYears, y: taxData.map(d => (d.effective_rate * 100).toFixed(1)), name: 'Effective Rate %',
+              type: 'scatter', mode: 'lines+markers', line: { color: '#ef4444', width: 2 }, marker: { size: 4 } },
+        ], {
+            ...baseLayout,
+            yaxis: { ...baseLayout.yaxis, title: 'Tax Rate %', tickformat: '.1f', ticksuffix: '%' },
+        }, { responsive: true });
+
+        // ── Year-by-Year Tax Table ──
+        const fmt = v => v == null ? '—' : '$' + Math.round(v).toLocaleString();
+        const tbody = document.getElementById('tax-table-body');
+        tbody.innerHTML = taxData.map(d => {
+            const rate = (d.effective_rate * 100).toFixed(1);
+            const rateColor = d.effective_rate < 0.05 ? 'text-green-600 dark:text-green-400'
+                            : d.effective_rate < 0.12 ? 'text-yellow-600 dark:text-yellow-400'
+                            : d.effective_rate < 0.20 ? 'text-orange-500 dark:text-orange-400'
+                            : 'text-red-600 dark:text-red-400';
+            return `<tr>
+                <td class="text-left py-1.5 px-2 font-medium">${labels[d.year] || 'Yr ' + d.year}</td>
+                <td class="py-1.5 px-2">${fmt(d.ss_income)}</td>
+                <td class="py-1.5 px-2">${fmt(d.ordinary_income)}</td>
+                <td class="py-1.5 px-2">${fmt(d.ltcg_income)}</td>
+                <td class="py-1.5 px-2">${fmt(d.withdrawal)}</td>
+                <td class="py-1.5 px-2">${fmt(d.expenses)}</td>
+                <td class="py-1.5 px-2 text-red-600 dark:text-red-400">${fmt(d.tax)}</td>
+                <td class="py-1.5 px-2 font-semibold ${rateColor}">${rate}%</td>
+            </tr>`;
+        }).join('');
+    }
+}
+</script>
+</body>
+</html>

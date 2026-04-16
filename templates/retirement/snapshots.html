@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Snapshots — Retirement Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else { document.documentElement.classList.remove('dark'); }
+    </script>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
+<div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-5xl">
+
+    <div class="flex items-center justify-between mb-6 border-b dark:border-gray-700 pb-4">
+        <h1 class="text-2xl font-extrabold text-gray-900 dark:text-white">
+            <i class="fa-solid fa-camera mr-3 text-blue-500"></i>Portfolio Snapshots
+        </h1>
+        <a href="{{ url_for('retirement.index') }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm">
+            <i class="fa-solid fa-arrow-left mr-2"></i>Retirement Planner
+        </a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="space-y-2 mb-6">
+                {% for category, message in messages %}
+                    <div class="px-4 py-3 rounded-lg text-sm font-medium
+                        {% if category == 'success' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                        {% elif category == 'danger' %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200
+                        {% else %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Add Snapshot -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4"><i class="fa-solid fa-plus mr-2 text-emerald-500"></i>Record a Balance Snapshot</h2>
+        <form method="POST" class="flex flex-wrap gap-3 items-end">
+            <div class="w-40">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Date</label>
+                <input type="date" name="date" value="{{ today }}" required class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Account Label</label>
+                <input type="text" name="account_label" required placeholder="e.g. Empower 401k" list="account-labels" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                <datalist id="account-labels">
+                    {% set labels = snapshots|map(attribute='account_label')|unique|list %}
+                    {% for label in labels %}
+                    <option value="{{ label }}">
+                    {% endfor %}
+                </datalist>
+            </div>
+            <div class="w-36">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Balance ($)</label>
+                <input type="number" step="0.01" name="balance" required class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white text-right">
+            </div>
+            <button type="submit" class="px-5 py-2 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition-colors">
+                <i class="fa-solid fa-floppy-disk mr-2"></i>Save
+            </button>
+        </form>
+    </div>
+
+    <!-- Existing Snapshots -->
+    {% if snapshots %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-750">
+                    <th class="text-left py-3 px-4">Date</th>
+                    <th class="text-left py-3 px-4">Account</th>
+                    <th class="text-right py-3 px-4">Balance</th>
+                    <th class="text-center py-3 px-4">Recorded</th>
+                    <th class="text-center py-3 px-4"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for snap in snapshots %}
+                <tr class="border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
+                    <td class="py-3 px-4 text-gray-900 dark:text-white font-medium">{{ snap.date.strftime('%Y-%m-%d') }}</td>
+                    <td class="py-3 px-4 text-gray-900 dark:text-white">{{ snap.account_label }}</td>
+                    <td class="py-3 px-4 text-right text-gray-900 dark:text-white font-mono">${{ "{:,.2f}".format(snap.balance) }}</td>
+                    <td class="py-3 px-4 text-center text-xs text-gray-400 dark:text-gray-500">{{ snap.created_at.strftime('%b %d, %Y') }}</td>
+                    <td class="py-3 px-4 text-center">
+                        <form method="POST" action="{{ url_for('retirement.delete_snapshot', snap_id=snap.id) }}" class="inline" onsubmit="return confirm('Delete?')">
+                            <button class="text-red-600 hover:text-red-800 dark:text-red-400"><i class="fa-solid fa-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center py-12 text-gray-400 dark:text-gray-500">
+        <i class="fa-solid fa-camera text-4xl mb-3"></i>
+        <p>No snapshots yet. Record your first balance above.</p>
+        <p class="text-xs mt-1">Tip: Enter once a year to track actual vs. projected growth.</p>
+    </div>
+    {% endif %}
+
+</div>
+</body>
+</html>

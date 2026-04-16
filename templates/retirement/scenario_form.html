@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ scenario.name if scenario else 'New Scenario' }} — Retirement Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else { document.documentElement.classList.remove('dark'); }
+    </script>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
+<div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-6xl">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6 border-b dark:border-gray-700 pb-4">
+        <h1 class="text-2xl font-extrabold text-gray-900 dark:text-white">
+            <i class="fa-solid fa-umbrella-beach mr-3 text-emerald-500"></i>
+            {{ scenario.name if scenario else 'New Scenario' }}
+        </h1>
+        <div class="flex items-center gap-3">
+            {% if scenario %}
+            <a href="{{ url_for('retirement.results', scenario_id=scenario.id) }}" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium">
+                <i class="fa-solid fa-play mr-2"></i>Run Simulation
+            </a>
+            {% endif %}
+            <a href="{{ url_for('retirement.index') }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm">
+                <i class="fa-solid fa-arrow-left mr-2"></i>All Scenarios
+            </a>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="space-y-2 mb-6">
+                {% for category, message in messages %}
+                    <div class="px-4 py-3 rounded-lg text-sm font-medium
+                        {% if category == 'success' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                        {% elif category == 'danger' %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200
+                        {% else %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- ═══ SCENARIO SETTINGS ═══ -->
+    <form method="POST" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white"><i class="fa-solid fa-sliders mr-2 text-blue-500"></i>Scenario Settings</h2>
+            {% if scenario %}
+            <span class="text-xs text-gray-400 dark:text-gray-500"><i class="fa-regular fa-clock mr-1"></i>Updated {{ scenario.updated_at.strftime('%b %d, %Y %I:%M %p') }}</span>
+            {% endif %}
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Scenario Name</label>
+                <input type="text" name="name" value="{{ scenario.name if scenario else '' }}" required
+                    class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Filing Status</label>
+                <select name="filing_status" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                    <option value="mfj" {{ 'selected' if not scenario or scenario.filing_status == 'mfj' }}>Married Filing Jointly</option>
+                    <option value="single" {{ 'selected' if scenario and scenario.filing_status == 'single' }}>Single</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Life Expectancy (age)</label>
+                <input type="number" name="life_expectancy_age" value="{{ scenario.life_expectancy_age if scenario else 90 }}" min="50" max="120"
+                    class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Mean Annual Return (%)</label>
+                <input type="number" step="0.01" name="growth_rate_mean" value="{{ (scenario.growth_rate_mean * 100)|round(2) if scenario else 7 }}"
+                    class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                <p class="text-xs text-gray-400 mt-1">Enter as % (e.g. 7 for 7%)</p>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Return Std Deviation (%)</label>
+                <input type="number" step="0.01" name="growth_rate_stddev" value="{{ (scenario.growth_rate_stddev * 100)|round(2) if scenario else 15 }}"
+                    class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Inflation Rate (%)</label>
+                <input type="number" step="0.01" name="inflation_rate" value="{{ (scenario.inflation_rate * 100)|round(2) if scenario else 3 }}"
+                    class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+        </div>
+        <div class="mb-4">
+            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Notes</label>
+            <textarea name="notes" rows="2" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">{{ scenario.notes or '' if scenario else '' }}</textarea>
+        </div>
+
+        {% if not scenario %}
+        <!-- Person 1 (on create) -->
+        <h3 class="text-md font-bold text-gray-800 dark:text-gray-200 mt-6 mb-3"><i class="fa-solid fa-user mr-2 text-indigo-500"></i>Person 1</h3>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Name</label>
+                <input type="text" name="person1_label" placeholder="e.g. Ben" required class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Date of Birth</label>
+                <input type="date" name="person1_dob" required class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Retire Age</label>
+                <input type="number" name="person1_retire_age" value="65" min="30" max="100" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">SS $/mo</label>
+                <input type="number" step="0.01" name="person1_ss" value="0" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">SS Start Age</label>
+                <input type="number" name="person1_ss_age" value="67" min="62" max="70" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+        </div>
+
+        <!-- Person 2 (optional on create) -->
+        <h3 class="text-md font-bold text-gray-800 dark:text-gray-200 mt-4 mb-3"><i class="fa-solid fa-user-plus mr-2 text-indigo-400"></i>Person 2 (Spouse — optional)</h3>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Name</label>
+                <input type="text" name="person2_label" placeholder="Leave blank to skip" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Date of Birth</label>
+                <input type="date" name="person2_dob" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Retire Age</label>
+                <input type="number" name="person2_retire_age" value="65" min="30" max="100" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">SS $/mo</label>
+                <input type="number" step="0.01" name="person2_ss" value="0" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">SS Start Age</label>
+                <input type="number" name="person2_ss_age" value="67" min="62" max="70" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+        </div>
+        {% endif %}
+
+        <button type="submit" class="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
+            <i class="fa-solid fa-floppy-disk mr-2"></i>{{ 'Save Changes' if scenario else 'Create Scenario' }}
+        </button>
+    </form>
+
+    {% if scenario %}
+    <!-- ═══ PEOPLE ═══ -->
+    {% for person in scenario.people %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white">
+                <i class="fa-solid fa-user mr-2 text-indigo-500"></i>{{ person.label }}
+            </h2>
+            <span class="text-xs text-gray-400 dark:text-gray-500"><i class="fa-regular fa-clock mr-1"></i>Updated {{ person.updated_at.strftime('%b %d, %Y %I:%M %p') }}</span>
+        </div>
+
+        <!-- Person Demographics (inline edit via scenario form) -->
+        <form method="POST" action="{{ url_for('retirement.edit_scenario', scenario_id=scenario.id) }}">
+            <input type="hidden" name="name" value="{{ scenario.name }}">
+            <input type="hidden" name="filing_status" value="{{ scenario.filing_status }}">
+            <input type="hidden" name="life_expectancy_age" value="{{ scenario.life_expectancy_age }}">
+            <input type="hidden" name="growth_rate_mean" value="{{ scenario.growth_rate_mean * 100 }}">
+            <input type="hidden" name="growth_rate_stddev" value="{{ scenario.growth_rate_stddev * 100 }}">
+            <input type="hidden" name="inflation_rate" value="{{ scenario.inflation_rate * 100 }}">
+            {% for p in scenario.people %}
+            {% if p.id != person.id %}
+            <input type="hidden" name="person_{{ p.id }}_label" value="{{ p.label }}">
+            <input type="hidden" name="person_{{ p.id }}_dob" value="{{ p.date_of_birth.strftime('%Y-%m-%d') }}">
+            <input type="hidden" name="person_{{ p.id }}_retire_age" value="{{ p.retirement_age }}">
+            <input type="hidden" name="person_{{ p.id }}_ss" value="{{ p.ss_monthly_benefit }}">
+            <input type="hidden" name="person_{{ p.id }}_ss_age" value="{{ p.ss_start_age }}">
+            {% endif %}
+            {% endfor %}
+
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Name</label>
+                    <input type="text" name="person_{{ person.id }}_label" value="{{ person.label }}"
+                        class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Date of Birth</label>
+                    <input type="date" name="person_{{ person.id }}_dob" value="{{ person.date_of_birth.strftime('%Y-%m-%d') }}"
+                        class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                    <p class="text-xs text-gray-400 mt-1">Age: {{ person.current_age }}</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Retire Age</label>
+                    <input type="number" name="person_{{ person.id }}_retire_age" value="{{ person.retirement_age }}" min="30" max="100"
+                        class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">SS $/mo</label>
+                    <input type="number" step="0.01" name="person_{{ person.id }}_ss" value="{{ person.ss_monthly_benefit }}"
+                        class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">SS Start Age</label>
+                    <input type="number" name="person_{{ person.id }}_ss_age" value="{{ person.ss_start_age }}" min="62" max="70"
+                        class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                </div>
+            </div>
+            <button type="submit" class="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mb-4">
+                <i class="fa-solid fa-floppy-disk mr-1"></i>Save Person Info
+            </button>
+        </form>
+
+        <!-- Accounts -->
+        <h3 class="text-md font-bold text-gray-800 dark:text-gray-200 mt-4 mb-3 border-t dark:border-gray-700 pt-4">
+            <i class="fa-solid fa-wallet mr-2 text-amber-500"></i>Accounts
+        </h3>
+
+        {% if person.accounts %}
+        <div class="overflow-x-auto mb-4">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-xs text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+                        <th class="text-left py-2 px-2">Name</th>
+                        <th class="text-left py-2 px-2">Tax Type</th>
+                        <th class="text-right py-2 px-2">Balance</th>
+                        <th class="text-right py-2 px-2">Monthly Contrib</th>
+                        <th class="text-right py-2 px-2">Growth Override</th>
+                        <th class="text-center py-2 px-2">Updated</th>
+                        <th class="text-center py-2 px-2">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for acct in person.accounts %}
+                    <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
+                        <form method="POST" action="{{ url_for('retirement.update_account', account_id=acct.id) }}">
+                            <td class="py-2 px-2">
+                                <input type="text" name="name" value="{{ acct.name }}" class="w-full px-2 py-1 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+                            </td>
+                            <td class="py-2 px-2">
+                                <select name="tax_type" class="w-full px-2 py-1 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+                                    {% for tt in ['traditional', 'roth', 'brokerage', 'vul', 'cash'] %}
+                                    <option value="{{ tt }}" {{ 'selected' if acct.tax_type == tt }}>{{ tt|title }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td class="py-2 px-2">
+                                <input type="number" step="0.01" name="balance" value="{{ acct.balance }}" class="w-full px-2 py-1 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white text-right">
+                            </td>
+                            <td class="py-2 px-2">
+                                <input type="number" step="0.01" name="monthly_contribution" value="{{ acct.monthly_contribution }}" class="w-full px-2 py-1 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white text-right">
+                            </td>
+                            <td class="py-2 px-2">
+                                <input type="number" step="0.01" name="growth_override" value="{{ acct.growth_override * 100 if acct.growth_override else '' }}" placeholder="—"
+                                    class="w-full px-2 py-1 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white text-right">
+                            </td>
+                            <td class="py-2 px-2 text-center text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                                {{ acct.updated_at.strftime('%b %d, %Y') }}
+                            </td>
+                            <td class="py-2 px-2 text-center whitespace-nowrap">
+                                <button type="submit" class="text-blue-600 hover:text-blue-800 dark:text-blue-400 mr-2" title="Save"><i class="fa-solid fa-floppy-disk"></i></button>
+                        </form>
+                                <form method="POST" action="{{ url_for('retirement.delete_account', account_id=acct.id) }}" class="inline" onsubmit="return confirm('Delete this account?')">
+                                    <button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                                </form>
+                            </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <!-- Add Account -->
+        <form method="POST" action="{{ url_for('retirement.add_account', person_id=person.id) }}" class="flex flex-wrap gap-2 items-end bg-gray-50 dark:bg-gray-750 rounded-lg p-3 border border-dashed border-gray-300 dark:border-gray-600">
+            <div class="flex-1 min-w-[140px]">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Account Name</label>
+                <input type="text" name="name" required placeholder="e.g. Empower 401k" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+            </div>
+            <div class="w-32">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Tax Type</label>
+                <select name="tax_type" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+                    {% for tt in ['traditional', 'roth', 'brokerage', 'vul', 'cash'] %}
+                    <option value="{{ tt }}">{{ tt|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="w-28">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Balance</label>
+                <input type="number" step="0.01" name="balance" value="0" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white text-right">
+            </div>
+            <div class="w-28">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Mo. Contrib</label>
+                <input type="number" step="0.01" name="monthly_contribution" value="0" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white text-right">
+            </div>
+            <div class="w-28">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Growth %</label>
+                <input type="number" step="0.01" name="growth_override" placeholder="—" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white text-right">
+            </div>
+            <button type="submit" class="px-4 py-1.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 transition-colors">
+                <i class="fa-solid fa-plus mr-1"></i>Add
+            </button>
+        </form>
+    </div>
+    {% endfor %}
+
+    <!-- Add Person (if < 2) -->
+    {% if scenario.people|length < 2 %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 mb-6">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4"><i class="fa-solid fa-user-plus mr-2 text-indigo-400"></i>Add Spouse</h2>
+        <form method="POST" action="{{ url_for('retirement.add_person', scenario_id=scenario.id) }}">
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Name</label>
+                    <input type="text" name="label" required placeholder="Spouse name" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Date of Birth</label>
+                    <input type="date" name="dob" required class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Retire Age</label>
+                    <input type="number" name="retire_age" value="65" min="30" max="100" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">SS $/mo</label>
+                    <input type="number" step="0.01" name="ss" value="0" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">SS Start Age</label>
+                    <input type="number" name="ss_age" value="67" min="62" max="70" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                </div>
+            </div>
+            <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors">
+                <i class="fa-solid fa-plus mr-1"></i>Add Person
+            </button>
+        </form>
+    </div>
+    {% endif %}
+
+    <!-- ═══ INCOME SOURCES ═══ -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white"><i class="fa-solid fa-money-bill-trend-up mr-2 text-green-500"></i>Retirement Income Sources</h2>
+            <span class="text-xs text-gray-400 dark:text-gray-500">SS is per-person above; these are additional household sources</span>
+        </div>
+
+        {% if scenario.income_sources %}
+        <div class="overflow-x-auto mb-4">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-xs text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+                        <th class="text-left py-2 px-2">Name</th>
+                        <th class="text-left py-2 px-2">Type</th>
+                        <th class="text-right py-2 px-2">Annual Amount</th>
+                        <th class="text-center py-2 px-2">Start Age</th>
+                        <th class="text-center py-2 px-2">Inflation Adj.</th>
+                        <th class="text-center py-2 px-2">Updated</th>
+                        <th class="text-center py-2 px-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for src in scenario.income_sources %}
+                    <tr class="border-b dark:border-gray-700">
+                        <td class="py-2 px-2 text-gray-900 dark:text-white">{{ src.name }}</td>
+                        <td class="py-2 px-2"><span class="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">{{ src.source_type }}</span></td>
+                        <td class="py-2 px-2 text-right text-gray-900 dark:text-white">${{ "{:,.0f}".format(src.annual_amount) }}</td>
+                        <td class="py-2 px-2 text-center text-gray-600 dark:text-gray-400">{{ src.start_age }}</td>
+                        <td class="py-2 px-2 text-center">
+                            {% if src.inflation_adjusted %}<i class="fa-solid fa-check text-green-500"></i>{% else %}<i class="fa-solid fa-minus text-gray-400"></i>{% endif %}
+                        </td>
+                        <td class="py-2 px-2 text-center text-xs text-gray-400 dark:text-gray-500">{{ src.updated_at.strftime('%b %d, %Y') }}</td>
+                        <td class="py-2 px-2 text-center">
+                            <form method="POST" action="{{ url_for('retirement.delete_income', income_id=src.id) }}" class="inline" onsubmit="return confirm('Remove?')">
+                                <button class="text-red-600 hover:text-red-800 dark:text-red-400"><i class="fa-solid fa-trash"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('retirement.add_income', scenario_id=scenario.id) }}" class="flex flex-wrap gap-2 items-end bg-gray-50 dark:bg-gray-750 rounded-lg p-3 border border-dashed border-gray-300 dark:border-gray-600">
+            <div class="flex-1 min-w-[140px]">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Name</label>
+                <input type="text" name="name" required placeholder="e.g. Rental Income" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+            </div>
+            <div class="w-36">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Type</label>
+                <select name="source_type" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+                    <option value="rental">Rental</option>
+                    <option value="brokerage_div">Brokerage Dividends</option>
+                    <option value="other" selected>Other</option>
+                </select>
+            </div>
+            <div class="w-28">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Annual $</label>
+                <input type="number" step="0.01" name="annual_amount" value="0" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white text-right">
+            </div>
+            <div class="w-24">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Start Age</label>
+                <input type="number" name="start_age" value="65" min="1" max="100" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+            </div>
+            <label class="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
+                <input type="checkbox" name="inflation_adjusted" checked class="w-4 h-4 rounded"> Inflation
+            </label>
+            <button type="submit" class="px-4 py-1.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 transition-colors">
+                <i class="fa-solid fa-plus mr-1"></i>Add
+            </button>
+        </form>
+    </div>
+
+    <!-- ═══ EXPENSES ═══ -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white"><i class="fa-solid fa-receipt mr-2 text-red-500"></i>Retirement Expenses</h2>
+            <div class="flex items-center gap-3">
+                {% if scenario.expense_items %}
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Total: ${{ "{:,.0f}".format(scenario.expense_items|sum(attribute='monthly_amount')) }}/mo
+                </span>
+                {% endif %}
+                <form method="POST" action="{{ url_for('retirement.import_expenses', scenario_id=scenario.id) }}">
+                    <button type="submit" class="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 transition-colors" onclick="return confirm('Import 12-month expense averages from your transaction history?')">
+                        <i class="fa-solid fa-file-import mr-1"></i>Import from Transactions
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {% if scenario.expense_items %}
+        <div class="overflow-x-auto mb-4">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-xs text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+                        <th class="text-left py-2 px-2">Label</th>
+                        <th class="text-left py-2 px-2">Category</th>
+                        <th class="text-right py-2 px-2">Monthly $</th>
+                        <th class="text-right py-2 px-2">Annual $</th>
+                        <th class="text-center py-2 px-2">Inflation Adj.</th>
+                        <th class="text-center py-2 px-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for exp in scenario.expense_items|sort(attribute='monthly_amount', reverse=true) %}
+                    <tr class="border-b dark:border-gray-700">
+                        <td class="py-2 px-2 text-gray-900 dark:text-white">{{ exp.label }}</td>
+                        <td class="py-2 px-2 text-xs text-gray-500 dark:text-gray-400">{{ exp.category.name if exp.category else '—' }}</td>
+                        <td class="py-2 px-2 text-right text-gray-900 dark:text-white">${{ "{:,.0f}".format(exp.monthly_amount) }}</td>
+                        <td class="py-2 px-2 text-right text-gray-500 dark:text-gray-400">${{ "{:,.0f}".format(exp.monthly_amount * 12) }}</td>
+                        <td class="py-2 px-2 text-center">
+                            {% if exp.inflation_adjusted %}<i class="fa-solid fa-check text-green-500"></i>{% else %}<i class="fa-solid fa-minus text-gray-400"></i>{% endif %}
+                        </td>
+                        <td class="py-2 px-2 text-center">
+                            <form method="POST" action="{{ url_for('retirement.delete_expense', expense_id=exp.id) }}" class="inline" onsubmit="return confirm('Remove?')">
+                                <button class="text-red-600 hover:text-red-800 dark:text-red-400"><i class="fa-solid fa-trash"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('retirement.add_expense', scenario_id=scenario.id) }}" class="flex flex-wrap gap-2 items-end bg-gray-50 dark:bg-gray-750 rounded-lg p-3 border border-dashed border-gray-300 dark:border-gray-600">
+            <div class="flex-1 min-w-[140px]">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Label</label>
+                <input type="text" name="label" required placeholder="e.g. Healthcare" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+            </div>
+            <div class="w-36">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Category (optional)</label>
+                <select name="category_id" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+                    <option value="">— None —</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat.id }}">{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="w-28">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Monthly $</label>
+                <input type="number" step="0.01" name="monthly_amount" value="0" class="w-full px-2 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white text-right">
+            </div>
+            <label class="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
+                <input type="checkbox" name="inflation_adjusted" checked class="w-4 h-4 rounded"> Inflation
+            </label>
+            <button type="submit" class="px-4 py-1.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 transition-colors">
+                <i class="fa-solid fa-plus mr-1"></i>Add
+            </button>
+        </form>
+    </div>
+    {% endif %}
+
+</div>
+</body>
+</html>
