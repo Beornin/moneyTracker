@@ -5,6 +5,7 @@ import json
 import shutil
 import subprocess
 import pandas as pd
+import requests as http_requests
 from datetime import datetime, date, timedelta
 from urllib.parse import urlparse
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort
@@ -84,6 +85,42 @@ def api_yearly_insight_data():
         return jsonify({"current_ytd_spending": cs, "last_ytd_spending": ls, "current_ytd_net": cn, "last_ytd_net": ln, "current_year": today.year, "last_year": today.year - 1})
     except Exception as e: return jsonify({'error': str(e)}), 500
 
+OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
+
+@app.route('/api/ai-insights', methods=['POST'])
+def api_ai_insights():
+    """Proxy AI insight requests to a local Ollama instance."""
+    body = request.get_json(silent=True) or {}
+    system_prompt = body.get('system', '')
+    user_prompt = body.get('prompt', '')
+    if not user_prompt:
+        return jsonify({'error': 'No prompt provided'}), 400
+
+    try:
+        resp = http_requests.post(
+            f'{OLLAMA_URL}/api/chat',
+            json={
+                'model': OLLAMA_MODEL,
+                'messages': [
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_prompt},
+                ],
+                'stream': False,
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        text = data.get('message', {}).get('content', '')
+        return jsonify({'text': text})
+    except http_requests.ConnectionError:
+        return jsonify({'error': 'Ollama is not running. Start it with: ollama serve'}), 503
+    except http_requests.Timeout:
+        return jsonify({'error': 'Ollama request timed out.'}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # --- ROUTES ---
 # --- Helper Function for Buckets ---
 def generate_buckets(start_date, end_date, bucket_type):
@@ -129,7 +166,7 @@ def index(month_offset):
     summary = service.get_summary_for_dashboard(month_offset)
     charts = service.generate_all_charts()
     
-    return render_template('index.html', month_offset=month_offset, summary=summary, accounts=Account.query.all(), gemini_api_key=os.getenv('GEMINI_API_KEY'), view_mode=view_mode, current_year=service.display_year, **charts)
+    return render_template('index.html', month_offset=month_offset, summary=summary, accounts=Account.query.all(), view_mode=view_mode, current_year=service.display_year, **charts)
 
 @app.route('/upload_file', methods=['POST'])
 def upload_file():
@@ -272,7 +309,10 @@ def upload_file():
             db.session.rollback()
             flash(f"File Error {file.filename}: {e}", "danger")
             
-    if added > 0: flash(f"Imported {added} transactions.", "success")
+    if added > 0:
+        flash(f"Imported {added} transactions.", "success")
+        ok, msg = run_backup()
+        flash(f"Auto-backup: {msg}", 'success' if ok else 'warning')
     return redirect(url_for('index'))
 
 @app.route('/manage_entities', methods=['GET', 'POST'])
@@ -1633,8 +1673,11 @@ PG_DUMP_CANDIDATES = [
 ]
 
 
-@app.route('/backup-db', methods=['POST'])
-def backup_db():
+def run_backup():
+    """
+    Run pg_dump and save to a datestamp subfolder under BACKUP_DIR.
+    Returns (success: bool, message: str).
+    """
     os.makedirs(BACKUP_DIR, exist_ok=True)
 
     pg_dump = shutil.which('pg_dump')
@@ -1644,8 +1687,7 @@ def backup_db():
                 pg_dump = candidate
                 break
     if not pg_dump:
-        flash('pg_dump not found. Add PostgreSQL bin to your PATH.', 'danger')
-        return redirect(request.referrer or url_for('index'))
+        return False, 'pg_dump not found. Add PostgreSQL bin to your PATH.'
 
     parsed = urlparse(app.config['SQLALCHEMY_DATABASE_URI'])
     now = datetime.now()
@@ -1671,15 +1713,93 @@ def backup_db():
         result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
         if result.returncode == 0:
             size_kb = os.path.getsize(backup_file) // 1024
-            flash(f'Backup saved: {backup_file} ({size_kb:,} KB)', 'success')
+            return True, f'Backup saved: {backup_file} ({size_kb:,} KB)'
         else:
-            flash(f'Backup failed: {result.stderr.strip()}', 'danger')
+            return False, f'Backup failed: {result.stderr.strip()}'
     except subprocess.TimeoutExpired:
-        flash('Backup timed out after 5 minutes.', 'danger')
+        return False, 'Backup timed out after 5 minutes.'
     except Exception as e:
-        flash(f'Backup error: {e}', 'danger')
+        return False, f'Backup error: {e}'
 
+
+@app.route('/backup-db', methods=['POST'])
+def backup_db():
+    ok, msg = run_backup()
+    flash(msg, 'success' if ok else 'danger')
     return redirect(request.referrer or url_for('index'))
+
+
+@app.route('/restore-db/list')
+def restore_db_list():
+    """Return available backup files as JSON, newest first."""
+    backups = []
+    if os.path.isdir(BACKUP_DIR):
+        for date_folder in sorted(os.listdir(BACKUP_DIR), reverse=True):
+            date_path = os.path.join(BACKUP_DIR, date_folder)
+            if os.path.isdir(date_path):
+                for fname in sorted(os.listdir(date_path), reverse=True):
+                    if fname.endswith('.dump'):
+                        fpath = os.path.join(date_path, fname)
+                        size_kb = os.path.getsize(fpath) // 1024
+                        backups.append({
+                            'label': f'{date_folder}  /  {fname}',
+                            'path': fpath,
+                            'size_kb': size_kb,
+                        })
+    return jsonify(backups)
+
+
+@app.route('/restore-db', methods=['POST'])
+def restore_db():
+    backup_path = request.form.get('backup_path', '').strip()
+
+    if not backup_path or not os.path.abspath(backup_path).startswith(os.path.abspath(BACKUP_DIR)):
+        flash('Invalid backup path.', 'danger')
+        return redirect(request.referrer or url_for('index'))
+
+    if not os.path.isfile(backup_path):
+        flash('Backup file not found.', 'danger')
+        return redirect(request.referrer or url_for('index'))
+
+    pg_restore = shutil.which('pg_restore')
+    if not pg_restore:
+        for candidate in PG_DUMP_CANDIDATES[1:]:
+            restore_candidate = candidate.replace('pg_dump.exe', 'pg_restore.exe')
+            if os.path.isfile(restore_candidate):
+                pg_restore = restore_candidate
+                break
+    if not pg_restore:
+        flash('pg_restore not found. Add PostgreSQL bin to your PATH.', 'danger')
+        return redirect(request.referrer or url_for('index'))
+
+    parsed = urlparse(app.config['SQLALCHEMY_DATABASE_URI'])
+    env = os.environ.copy()
+    if parsed.password:
+        env['PGPASSWORD'] = parsed.password
+
+    cmd = [
+        pg_restore,
+        '-h', parsed.hostname or 'localhost',
+        '-p', str(parsed.port or 5432),
+        '-U', parsed.username or 'postgres',
+        '-d', parsed.path.lstrip('/'),
+        '--clean', '--if-exists',
+        '-F', 'c',
+        backup_path,
+    ]
+
+    try:
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            flash(f'Database restored from: {backup_path} — restart the server to reload fresh data.', 'success')
+        else:
+            flash(f'Restore failed: {result.stderr.strip()}', 'danger')
+    except subprocess.TimeoutExpired:
+        flash('Restore timed out after 5 minutes.', 'danger')
+    except Exception as e:
+        flash(f'Restore error: {e}', 'danger')
+
+    return redirect(url_for('index'))
 
 
 if __name__ == '__main__':
