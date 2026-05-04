@@ -146,6 +146,18 @@
                 <i class="fa-solid fa-calendar-week mr-1"></i>Weekly View
             </span>
         </label>
+        <label class="inline-flex items-center cursor-pointer mr-4" title="Include the current incomplete period in charts">
+            <input type="checkbox" id="partial-toggle" class="sr-only peer" {% if show_partial %}checked{% endif %}>
+            <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 dark:peer-focus:ring-amber-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-amber-500"></div>
+            <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">
+                <i class="fa-solid fa-hourglass-half mr-1"></i>Show Partial Period
+            </span>
+        </label>
+        {% if data_through %}
+        <span class="mr-4 text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" title="Latest statement end date across checking + credit card accounts">
+            <i class="fa-solid fa-clock mr-1"></i>Data through: {{ data_through.strftime('%b %d, %Y') }}
+        </span>
+        {% endif %}
                 <label class="inline-flex items-center cursor-pointer mr-4">
                     <input type="checkbox" id="ai-toggle" class="sr-only peer">
                     <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
@@ -350,16 +362,17 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Your overall financial performance.<br>
-                        <strong>Question Answered:</strong> "Am I earning more than I'm spending?"<br>
+                        <strong>Full Cashflow</strong> — complete financial picture.<br>
+                        <strong>Question:</strong> "Am I earning more than I'm spending overall?"<br>
                         <strong>The Math:</strong><br>
-                        <span class="text-green-400">Income:</span> All positive transactions (amount > 0).<br>
-                        <span class="text-blue-400">Expenses:</span> All negative transactions (amount < 0).<br>
-                        <span class="text-yellow-500">Line:</span> Cumulative surplus over time.<br>
-                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' category only.
+                        <span class="text-green-400">Income:</span> All net-positive entity amounts.<br>
+                        <span class="text-blue-400">Expenses:</span> All net-negative entity amounts.<br>
+                        <span class="text-yellow-500">Line:</span> Cumulative surplus (YTD &amp; all-time).<br>
+                        <strong>Credit Handling:</strong> Same-vendor refunds net within each period (e.g. $50 charge + $20 refund from Target = $30 expense). Cross-period or cross-vendor refunds appear as income.<br>
+                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' only.
                     </span>
                 </div>
-                <div id="chart-core-operating" class="w-full h-full"></div>
+                <div id="chart-full-cashflow" class="w-full h-full"></div>
                 </div>
 
         </div>
@@ -369,17 +382,17 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Operating performance excluding Investment Transfers.<br>
-                        <strong>Question Answered:</strong> "Am I earning more than I'm spending (excluding investments)?"<br>
+                        <strong>Wealth Builder</strong> — is your net worth growing?<br>
                         <strong>The Math:</strong><br>
-                        <span class="text-green-400">Income:</span> All positive transactions.<br>
-                        <span class="text-blue-400">Expenses:</span> All negative transactions EXCEPT Investment Transfer category.<br>
-                        <span class="text-yellow-500">Line:</span> Cumulative surplus over time.<br>
-                        <strong>Key Difference:</strong> Money transferred to investments is NOT counted as an expense (it's savings!).<br>
-                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' and 'Investment Transfer' categories.
+                        <span class="text-green-400">Income:</span> Net-positive entities (excl. Investment withdrawals).<br>
+                        <span class="text-red-400">Inv. Withdrawals:</span> Shown separately in red.<br>
+                        <span class="text-blue-400">Expenses:</span> Net-negative entities (excl. Investment).<br>
+                        <span class="text-yellow-500">Cumulative Line:</span> Internal flows (Investment, Savings Transfer, Investment Transfer, VUL) are wealth-neutral — inflows offset spending but outflows aren't counted as expense loss.<br>
+                        <strong>Credit Handling:</strong> Same-vendor refunds net within each period. Different-month or different-vendor refunds appear as income.<br>
+                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment'; cumulative excludes internal-flow negatives.
                     </span>
                 </div>
-                <div id="chart-income-expense" class="w-full h-full"></div>
+                <div id="chart-wealth-builder" class="w-full h-full"></div>
             </div>
         </div>
 
@@ -391,12 +404,14 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "On which days am I weakest?"<br>
-                        <strong>The Math:</strong> Total 'Eat Out' spending grouped by Day of the Week.<br>
-                        <strong>Insight:</strong> If Friday is red, try meal-prepping specifically for Friday nights.
+                        <strong>Dining Patterns</strong> — spending by day of week.<br>
+                        <strong>Question:</strong> "On which days am I weakest?"<br>
+                        <strong>The Math:</strong> Total 'Eat Out' charges grouped by day of week.<br>
+                        <strong>Credit Handling:</strong> Only charges (negative amounts) count. Eat Out refunds/credits are ignored — a refund is not a dining event.<br>
+                        <strong>Insight:</strong> If Friday is red, try meal-prepping for Friday nights.
                     </span>
                 </div>
-                <div id="chart-eat-out-patterns" class="w-full h-full"></div>
+                <div id="chart-dining-patterns" class="w-full h-full"></div>
             </div>
             </div>
             
@@ -405,11 +420,13 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>Question Answered:</strong> "Am I cooking enough vs ordering out?"<br>
-                        <strong>The Math:</strong> Direct comparison of the 'Groceries' category vs 'Eat Out'.
+                        <strong>Food Spending</strong> — Groceries vs Eating Out.<br>
+                        <strong>Question:</strong> "Am I cooking enough vs ordering out?"<br>
+                        <strong>The Math:</strong> Net-negative entities in 'Groceries' vs 'Eat Out' categories per period.<br>
+                        <strong>Credit Handling:</strong> Same-vendor refunds net within each period. A grocery store refund reduces that period's grocery total.
                     </span>
                 </div>
-                <div id="chart-groceries" class="w-full h-full"></div>
+                <div id="chart-food-spending" class="w-full h-full"></div>
             </div>
         </div>
 
@@ -420,13 +437,14 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Year-over-year JEA utility comparison.<br>
-                        <strong>Question Answered:</strong> "How does this year's JEA bill compare to past years?"<br>
+                        <strong>Utilities YoY</strong> — JEA year-over-year comparison.<br>
+                        <strong>Question:</strong> "How does this year's JEA bill compare to past years?"<br>
                         <strong>The Math:</strong> Monthly JEA expenses for the last 3 years, grouped by month.<br>
+                        <strong>Credit Handling:</strong> JEA refunds/credits net per month within each year. A billing adjustment reduces that month's total.<br>
                         <strong>Shows:</strong> Seasonal patterns and year-over-year trends.
                     </span>
                 </div>
-                <div id="chart-yoy-comparison" class="w-full h-full"></div>
+                <div id="chart-utilities-yoy" class="w-full h-full"></div>
             </div>
             
 
@@ -434,14 +452,14 @@
                  <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Top expense payees/vendors.<br>
-                        <strong>Question Answered:</strong> "Who are my biggest expense vendors overall?"<br>
-                        <strong>The Math:</strong> Top 20 payees/entities ranked by total expenses.<br>
-                        <strong>Logic:</strong> Groups transactions by entity (e.g., all Publix locations combined).<br>
-                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' category only.
+                        <strong>Top 20 Vendors</strong> — biggest expense payees.<br>
+                        <strong>Question:</strong> "Who gets the most of my money?"<br>
+                        <strong>The Math:</strong> Top 20 entities ranked by total net expenses.<br>
+                        <strong>Credit Handling:</strong> Netted across the entire visible period. If a vendor has $500 in charges and $100 in refunds, it shows as $400.<br>
+                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' and internal flows (Investment, Savings Transfer, etc.).
                     </span>
                 </div>
-                <div id="chart-core-summary" class="w-full h-full"></div>
+                <div id="chart-top-vendors" class="w-full h-full"></div>
             </div>
         </div>
 
@@ -450,14 +468,14 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Expense breakdown by category over time.<br>
-                        <strong>Question Answered:</strong> "Which categories are consuming my money each period?"<br>
-                        <strong>The Math:</strong> Sum of expenses per category (amount < 0), stacked bars.<br>
-                        <strong>Shows:</strong> Visual breakdown of where money is going by category.<br>
-                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' category only.
+                        <strong>Category Breakdown</strong> — expenses by category over time.<br>
+                        <strong>Question:</strong> "Where is my money going each period?"<br>
+                        <strong>The Math:</strong> Net expenses per entity, bucketed by category, stacked bars.<br>
+                        <strong>Credit Handling:</strong> Same-vendor refunds net within each period and reduce that category's total. Net-positive entities (more refunds than charges) are excluded from expense bars.<br>
+                        <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' only.
                     </span>
                 </div>
-                <div id="chart-core-breakdown" class="w-full h-full"></div>
+                <div id="chart-category-breakdown" class="w-full h-full"></div>
             </div>
         </div>
 
@@ -469,31 +487,31 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-indigo-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Savings rate trend over time.<br>
-                        <strong>Question Answered:</strong> "What percentage of my income am I actually saving?"<br>
-                        <strong>The Math:</strong> (Income - Expenses) / Income × 100 per period.<br>
-                        <span class="text-green-400">Green (≥20%):</span> Good savings rate.<br>
-                        <span class="text-yellow-500">Orange (10-19%):</span> Fair savings rate.<br>
-                        <span class="text-red-400">Red (<10%):</span> Needs improvement.<br>
+                        <strong>Savings Rate</strong> — % of income saved each period.<br>
+                        <strong>Question:</strong> "What percentage of my income am I actually saving?"<br>
+                        <strong>The Math:</strong> (Income - Expenses) / Income × 100.<br>
+                        <span class="text-green-400">Green (≥20%):</span> Good.<br>
+                        <span class="text-yellow-500">Orange (10-19%):</span> Fair.<br>
+                        <span class="text-red-400">Red (&lt;10%):</span> Needs improvement.<br>
+                        <strong>Credit Handling:</strong> Same-vendor refunds net within each period. Internal flows (Investment, Savings Transfer, Investment Transfer, VUL) excluded from both income and expenses so they don't distort the rate.<br>
                         <strong>Benchmark lines:</strong> 20% (Good) and 50% (Excellent).
                     </span>
                 </div>
-                <div id="chart-expense-broad" class="w-full h-full"></div>
+                <div id="chart-savings-rate" class="w-full h-full"></div>
             </div>
 
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-purple-200 dark:border-purple-900 h-[700px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-purple-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Top income sources for the selected year.<br>
-                        <strong>Question Answered:</strong> "Where does my money come from?"<br>
-                        <strong>The Math:</strong> Total income per entity/source.<br>
-                        <strong>Display:</strong> Top 10 sources, sorted with highest income at bottom (easiest to read).<br>
-                        <strong>Logic:</strong> Groups raw descriptions by entity rules.<br>
+                        <strong>Income Sources</strong> — top 10 income sources.<br>
+                        <strong>Question:</strong> "Where does my money come from?"<br>
+                        <strong>The Math:</strong> Net amount per entity across visible period; top 10 positive shown.<br>
+                        <strong>Credit Handling:</strong> Entities are netted across the full visible range. Only entities with net-positive amounts appear. A vendor that's mostly charges won't show even if it occasionally refunds.<br>
                         <strong>Filtered Out:</strong> 'Ignored Credit Card Payment' category.
                     </span>
                 </div>
-                <div id="chart-top-expenses" class="w-full h-full"></div>
+                <div id="chart-income-sources" class="w-full h-full"></div>
             </div>
         </div>
         
@@ -503,11 +521,12 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-heart-pulse text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Dedicated HSA Expenses.<br>
-                        <strong>Note:</strong> These expenses are EXCLUDED from all other charts above to keep your operating budget clean.
+                        <strong>HSA Spending</strong> — health savings account expenses by payee.<br>
+                        <strong>Note:</strong> Excluded from ALL other charts to keep your operating budget clean.<br>
+                        <strong>Credit Handling:</strong> Same-vendor refunds net within each period. Only net-negative entities (actual spend) are shown per period.
                     </span>
                 </div>
-                <div id="chart-hsa-activity" class="w-full h-full"></div>
+                <div id="chart-hsa-spending" class="w-full h-full"></div>
             </div>
         </div>
 
@@ -516,8 +535,9 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-chart-line text-gray-400 hover:text-green-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Interest and dividends earned from the Fidelity brokerage account (CDs, SPAXX, ETFs).<br>
-                        <strong>Note:</strong> Stacked by symbol. Fully excluded from all core and wealth charts.
+                        <strong>Brokerage Income</strong> — interest &amp; dividends by symbol.<br>
+                        <strong>Note:</strong> Fully excluded from all core and wealth charts.<br>
+                        <strong>Credit Handling:</strong> Only positive amounts (income) are shown. Brokerage fees/charges are not included here.
                     </span>
                 </div>
                 <div id="chart-brokerage-income" class="w-full h-full"></div>
@@ -529,8 +549,9 @@
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-chart-line text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
-                        <strong>What is this?</strong> Passive income (brokerage) as a percentage of core monthly expenses.<br>
-                        <strong>Green</strong> = fully covered. The dashed red line marks 100% coverage.
+                        <strong>Passive Coverage</strong> — brokerage income as % of core expenses.<br>
+                        <strong>Green</strong> = fully covered. Dashed red line = 100%.<br>
+                        <strong>Credit Handling:</strong> Core expenses use entity netting (same-vendor refunds offset charges). Brokerage income is positive amounts only. Internal flows excluded from expense denominator.
                     </span>
                 </div>
                 <div id="chart-passive-coverage" class="w-full h-full"></div>
@@ -562,32 +583,31 @@
             }
             
             function renderAllCharts() {
-                // Note: We use the new keys from app.py here
-                const plot1 = {{ chart_income_vs_expense|safe if chart_income_vs_expense else 'null' }};
-                const plot4 = {{ chart_core_operating|safe if chart_core_operating else 'null' }};
-                const plot5 = {{ chart_groceries|safe if chart_groceries else 'null' }};
-                const plot6 = {{ chart_expense_broad|safe if chart_expense_broad else 'null' }};
-                const plot7 = {{ chart_top_payees|safe if chart_top_payees else 'null' }};
-                const plot8 = {{ chart_yoy|safe if chart_yoy else 'null' }};
-                const plot9 = {{ chart_core_summary|safe if chart_core_summary else 'null' }}; 
-                const plot10 = {{ chart_core_breakdown|safe if chart_core_breakdown else 'null' }};
-                const plot11 = {{ chart_hsa_activity|safe if chart_hsa_activity else 'null' }}; // NEW CHART
-                const plot12 = {{ chart_eat_out_patterns|safe if chart_eat_out_patterns else 'null' }};
-                const plot13 = {{ chart_brokerage_income|safe if chart_brokerage_income else 'null' }};
-                const plot14 = {{ chart_passive_coverage|safe if chart_passive_coverage else 'null' }};
+                const plotFullCashflow      = {{ chart_full_cashflow|safe if chart_full_cashflow else 'null' }};
+                const plotWealthBuilder     = {{ chart_wealth_builder|safe if chart_wealth_builder else 'null' }};
+                const plotFoodSpending      = {{ chart_food_spending|safe if chart_food_spending else 'null' }};
+                const plotSavingsRate       = {{ chart_savings_rate|safe if chart_savings_rate else 'null' }};
+                const plotIncomeSources     = {{ chart_income_sources|safe if chart_income_sources else 'null' }};
+                const plotUtilitiesYoy      = {{ chart_utilities_yoy|safe if chart_utilities_yoy else 'null' }};
+                const plotTopVendors        = {{ chart_top_vendors|safe if chart_top_vendors else 'null' }};
+                const plotCategoryBreakdown = {{ chart_category_breakdown|safe if chart_category_breakdown else 'null' }};
+                const plotHsaSpending       = {{ chart_hsa_spending|safe if chart_hsa_spending else 'null' }};
+                const plotDiningPatterns    = {{ chart_dining_patterns|safe if chart_dining_patterns else 'null' }};
+                const plotBrokerageIncome   = {{ chart_brokerage_income|safe if chart_brokerage_income else 'null' }};
+                const plotPassiveCoverage   = {{ chart_passive_coverage|safe if chart_passive_coverage else 'null' }};
 
-                renderChart(plot1, 'chart-income-expense');
-                renderChart(plot4, 'chart-core-operating');
-                renderChart(plot9, 'chart-core-summary'); 
-                renderChart(plot10, 'chart-core-breakdown'); 
-                renderChart(plot6, 'chart-expense-broad');
-                renderChart(plot7, 'chart-top-expenses');
-                renderChart(plot8, 'chart-yoy-comparison');
-                renderChart(plot5, 'chart-groceries');
-                renderChart(plot11, 'chart-hsa-activity');
-                renderChart(plot12, 'chart-eat-out-patterns');
-                renderChart(plot13, 'chart-brokerage-income');
-                renderChart(plot14, 'chart-passive-coverage');
+                renderChart(plotFullCashflow,      'chart-full-cashflow');
+                renderChart(plotWealthBuilder,     'chart-wealth-builder');
+                renderChart(plotTopVendors,        'chart-top-vendors');
+                renderChart(plotCategoryBreakdown, 'chart-category-breakdown');
+                renderChart(plotSavingsRate,       'chart-savings-rate');
+                renderChart(plotIncomeSources,     'chart-income-sources');
+                renderChart(plotUtilitiesYoy,      'chart-utilities-yoy');
+                renderChart(plotFoodSpending,      'chart-food-spending');
+                renderChart(plotHsaSpending,       'chart-hsa-spending');
+                renderChart(plotDiningPatterns,    'chart-dining-patterns');
+                renderChart(plotBrokerageIncome,   'chart-brokerage-income');
+                renderChart(plotPassiveCoverage,   'chart-passive-coverage');
             }
 
             var themeToggleBtn = document.getElementById('theme-toggle');
@@ -827,6 +847,15 @@
             url.searchParams.set('view', 'weekly');
         } else {
             url.searchParams.set('view', 'monthly');
+        }
+        window.location.href = url.toString();
+    });
+    document.getElementById('partial-toggle').addEventListener('change', function() {
+        const url = new URL(window.location.href);
+        if(this.checked) {
+            url.searchParams.set('partial', 'yes');
+        } else {
+            url.searchParams.delete('partial');
         }
         window.location.href = url.toString();
     });

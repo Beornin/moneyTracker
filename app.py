@@ -161,12 +161,13 @@ def index(month_offset):
     
     view_mode = request.args.get('view', 'monthly')
     year = request.args.get('year', type=int)
-    
-    service = DashboardService(view_mode=view_mode, year=year)
+    show_partial = request.args.get('partial', 'no') == 'yes'
+
+    service = DashboardService(view_mode=view_mode, year=year, show_partial=show_partial)
     summary = service.get_summary_for_dashboard(month_offset)
     charts = service.generate_all_charts()
-    
-    return render_template('index.html', month_offset=month_offset, summary=summary, accounts=Account.query.all(), view_mode=view_mode, current_year=service.display_year, **charts)
+
+    return render_template('index.html', month_offset=month_offset, summary=summary, accounts=Account.query.all(), view_mode=view_mode, show_partial=show_partial, data_through=service.today, current_year=service.display_year, **charts)
 
 @app.route('/upload_file', methods=['POST'])
 def upload_file():

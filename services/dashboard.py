@@ -13,8 +13,9 @@ from models import (
 
 
 class DashboardService:
-    def __init__(self, view_mode='monthly', year=None):
+    def __init__(self, view_mode='monthly', year=None, show_partial=False):
         self.view_mode = view_mode
+        self.show_partial = show_partial
 
         core_types = ['checking', 'credit_card']
 
@@ -87,7 +88,18 @@ class DashboardService:
         self.margin_events = dict(t=60, b=20, l=50, r=10)
 
         tick_fmt = '%b %Y' if self.view_mode == 'monthly' else '%b %d'
-        self.xaxis_date = dict(rangeslider=dict(visible=True), type='date', tickformat=tick_fmt)
+        # Pin the x-axis to the displayed year so Plotly's auto-tick doesn't
+        # show phantom labels (e.g., "Dec 2025" on a 2026 chart). Pad both ends
+        # by roughly half a bar-width so the first/last bar isn't clipped.
+        pad_days = 7 if self.view_mode == 'monthly' else 2
+        year_start = date(self.display_year, 1, 1) - timedelta(days=pad_days)
+        year_end = date(self.display_year, 12, 31) + timedelta(days=pad_days)
+        self.xaxis_date = dict(
+            rangeslider=dict(visible=True),
+            type='date',
+            tickformat=tick_fmt,
+            range=[year_start.strftime('%Y-%m-%d'), year_end.strftime('%Y-%m-%d')],
+        )
         self.xaxis_cat = dict(rangeslider=dict(visible=False), type='category')
 
     def get_summary_for_dashboard(self, month_offset):
@@ -145,6 +157,76 @@ class DashboardService:
         anns = [{'x': k, 'y': 1.02, 'xref': 'x', 'yref': 'paper', 'text': "📍 " + "<br>📍 ".join(v), 'showarrow': False, 'xanchor': 'center', 'yanchor': 'bottom', 'font': {'size': 10, 'color': '#4b5563'}, 'align': 'center'} for k, v in events_map.items()]
         return shapes, anns
 
+    def _is_period_complete(self, period_start):
+        """True if the period ending after this start is fully covered by imported statements."""
+        if self.view_mode == 'weekly':
+            period_end = period_start + timedelta(days=6)
+        else:
+            if period_start.month == 12:
+                period_end = date(period_start.year, 12, 31)
+            else:
+                period_end = date(period_start.year, period_start.month + 1, 1) - timedelta(days=1)
+        return period_end <= self.today
+
+    def _prior_years_surplus(self, income_exclude_cats=None, expense_exclude_cats=None):
+        """Sum (income - expense) for all months prior to display_year, applying per-entity netting.
+
+        income_exclude_cats: categories whose POSITIVE amounts should NOT count as income.
+        expense_exclude_cats: categories whose NEGATIVE amounts should NOT count as expense.
+        Asymmetric exclusion lets internal flows (e.g. Savings Transfer) be treated as wealth-neutral.
+        Cached per (income_excl, expense_excl) signature."""
+        inc_key = tuple(sorted(set(income_exclude_cats or [EXCLUDED_CAT])))
+        exp_key = tuple(sorted(set(expense_exclude_cats or [EXCLUDED_CAT])))
+        cache_key = (inc_key, exp_key)
+        if not hasattr(self, '_prior_surplus_cache'):
+            self._prior_surplus_cache = {}
+        if cache_key in self._prior_surplus_cache:
+            return self._prior_surplus_cache[cache_key]
+
+        year_start = date(self.display_year, 1, 1)
+        excluded_account_ids = self.hsa_account_ids | self.brokerage_account_ids
+        q = Transaction.query.options(
+            joinedload(Transaction.category),
+            joinedload(Transaction.entity)
+        ).filter(
+            Transaction.date < year_start,
+            Transaction.is_deleted == False
+        )
+        if excluded_account_ids:
+            q = q.filter(~Transaction.account_id.in_(excluded_account_ids))
+        prior_txs = q.all()
+
+        by_month = {}
+        for t in prior_txs:
+            key = t.date.replace(day=1)
+            by_month.setdefault(key, []).append(t)
+
+        total = 0.0
+        for month_txs in by_month.values():
+            inc_nets = self._net_by_entity(month_txs, exclude_cats=inc_key)
+            exp_nets = self._net_by_entity(month_txs, exclude_cats=exp_key)
+            inc = sum(i['amount'] for i in inc_nets.values() if i['amount'] > 0)
+            exp = abs(sum(i['amount'] for i in exp_nets.values() if i['amount'] < 0))
+            total += (inc - exp)
+
+        self._prior_surplus_cache[cache_key] = total
+        return total
+
+    def _net_by_entity(self, p_txs, exclude_cats=None):
+        """Net transactions by entity within a list of txs (typically one period).
+        Returns {entity_id: {'name', 'category_name', 'amount'}} where amount is signed.
+        Used so a refund cancels its original charge instead of being treated as income."""
+        exclude = set(exclude_cats or [EXCLUDED_CAT])
+        nets = {}
+        for t in p_txs:
+            if t.category.name in exclude:
+                continue
+            eid = t.entity_id
+            if eid not in nets:
+                nets[eid] = {'name': t.entity.name, 'category_name': t.category.name, 'amount': 0.0}
+            nets[eid]['amount'] += float(t.amount)
+        return nets
+
     def _group_transactions(self, txs, start, end, force_monthly=False):
         """Performance: Group transactions by period key once (O(N)) instead of filtering in loops (O(N^2))."""
         groups = {}
@@ -158,15 +240,17 @@ class DashboardService:
                 groups[key].append(t)
         return groups
 
-    def _chart_eat_out_patterns(self, start_date, end_date):
+    def _chart_dining_patterns(self, start_date, end_date):
         dow_totals = {i: 0.0 for i in range(7)}
         dow_counts = {i: 0 for i in range(7)}
         dow_payees = {i: {} for i in range(7)}
         days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
+        # Only count actual spend events (negative amounts). Refunds are not eat-out events.
         txs = [t for t in self.core_transactions
                if start_date <= t.date <= end_date
-               and t.category.name == 'Eat Out']
+               and t.category.name == 'Eat Out'
+               and t.amount < 0]
 
         for t in txs:
             idx = t.date.weekday()
@@ -243,40 +327,32 @@ class DashboardService:
                 if curr.month == 12: curr = date(curr.year + 1, 1, 1)
                 else: curr = date(curr.year, curr.month + 1, 1)
 
+        if not self.show_partial:
+            periods = [p for p in periods if self._is_period_complete(p)]
+            # Clamp the visible date range so charts that use start/end (top payees, hsa, brokerage, etc.)
+            # agree with the filtered period bars.
+            if self.today < end_date:
+                end_date = self.today
+
         period_strs = [p.strftime('%Y-%m-%d') for p in periods]
 
-        monthly_periods = []
-        monthly_start = date(self.display_year, 1, 1)
-        monthly_end = date(self.display_year, 12, 31)
-        curr_month = monthly_start
-        while curr_month <= monthly_end:
-            monthly_periods.append(curr_month)
-            if curr_month.month == 12:
-                curr_month = date(curr_month.year + 1, 1, 1)
-            else:
-                curr_month = date(curr_month.year, curr_month.month + 1, 1)
-        monthly_period_strs = [p.strftime('%Y-%m-%d') for p in monthly_periods]
-
         grouped_core = self._group_transactions(self.core_transactions, start_date, end_date)
-        grouped_core_monthly = self._group_transactions(self.core_transactions, monthly_start, monthly_end, force_monthly=True)
 
         shapes, anns = self._get_event_overlays(start_date, end_date)
 
         return {
-            'chart_income_vs_expense': self._chart_income_vs_expense(periods, period_strs, grouped_core, shapes, anns),
-            'chart_savings': self._chart_savings(periods, period_strs, grouped_core, shapes, anns),
-            'chart_cash_flow': self._chart_cash_flow(periods, period_strs, grouped_core, shapes, anns),
-            'chart_core_operating': self._chart_core_operating(periods, period_strs, grouped_core, shapes, anns),
-            'chart_groceries': self._chart_groceries(periods, period_strs, grouped_core, shapes, anns),
-            'chart_expense_broad': self._chart_expense_broad(periods, period_strs, grouped_core, shapes, anns),
-            'chart_core_summary': self._chart_core_summary(periods, period_strs, grouped_core, shapes, anns),
-            'chart_top_payees': self._chart_top_payees(self.core_transactions, start_date),
-            'chart_yoy': self._chart_yoy(),
-            'chart_core_breakdown': self._chart_core_breakdown(periods, period_strs, grouped_core, shapes, anns),
-            'chart_hsa_activity': self._chart_hsa_activity(periods, period_strs, start_date, end_date),
-            'chart_eat_out_patterns': self._chart_eat_out_patterns(start_date, end_date),
+            'chart_wealth_builder': self._chart_wealth_builder(periods, period_strs, grouped_core, shapes, anns),
+            'chart_full_cashflow': self._chart_full_cashflow(periods, period_strs, grouped_core, shapes, anns),
+            'chart_food_spending': self._chart_food_spending(periods, period_strs, grouped_core, shapes, anns),
+            'chart_savings_rate': self._chart_savings_rate(periods, period_strs, grouped_core, shapes, anns),
+            'chart_top_vendors': self._chart_top_vendors(periods, period_strs, grouped_core, shapes, anns),
+            'chart_income_sources': self._chart_income_sources(self.core_transactions, start_date, end_date),
+            'chart_utilities_yoy': self._chart_utilities_yoy(),
+            'chart_category_breakdown': self._chart_category_breakdown(periods, period_strs, grouped_core, shapes, anns),
+            'chart_hsa_spending': self._chart_hsa_spending(periods, period_strs, start_date, end_date),
+            'chart_dining_patterns': self._chart_dining_patterns(start_date, end_date),
             'chart_brokerage_income': self._chart_brokerage_income(periods, period_strs, start_date, end_date),
-            'chart_passive_coverage': self._chart_passive_income_coverage(periods, period_strs, start_date, end_date),
+            'chart_passive_coverage': self._chart_passive_coverage(periods, period_strs, start_date, end_date),
         }
 
     def _is_core_expense(self, t):
@@ -363,14 +439,21 @@ class DashboardService:
         )
         return to_json(fig, pretty=True)
 
-    def _chart_hsa_activity(self, periods, period_strs, start_date, end_date):
+    def _chart_hsa_spending(self, periods, period_strs, start_date, end_date):
         data_by_payee = {}
-        txs = [t for t in self.hsa_transactions if start_date <= t.date <= end_date and t.amount < 0]
-        for t in txs:
-            name = t.entity.name
+        # Group all in-range HSA txs by period; net by entity within each period so refunds cancel charges
+        in_range = [t for t in self.hsa_transactions if start_date <= t.date <= end_date]
+        per_period = {}
+        for t in in_range:
             m_key = self._get_period_key(t.date).strftime('%Y-%m-%d')
-            if name not in data_by_payee: data_by_payee[name] = {}
-            data_by_payee[name][m_key] = data_by_payee[name].get(m_key, 0.0) + float(abs(t.amount))
+            per_period.setdefault(m_key, []).append(t)
+        for m_key, p_txs in per_period.items():
+            entity_nets = self._net_by_entity(p_txs)
+            for info in entity_nets.values():
+                if info['amount'] < 0:
+                    name = info['name']
+                    if name not in data_by_payee: data_by_payee[name] = {}
+                    data_by_payee[name][m_key] = data_by_payee[name].get(m_key, 0.0) + abs(info['amount'])
         traces = []
         for name in sorted(data_by_payee.keys(), reverse=True):
             y_vals = [data_by_payee[name].get(m, 0.0) for m in period_strs]
@@ -379,20 +462,21 @@ class DashboardService:
         fig.update_layout(title='HSA Expenses by Payee', yaxis=dict(title='Spent ($)', tickformat="$,.0f"), xaxis=self.xaxis_date, barmode='stack', margin=self.margin_events, **self.base_layout)
         return to_json(fig, pretty=True)
 
-    def _chart_core_breakdown(self, periods, period_strs, grouped_txs, shapes, anns):
+    def _chart_category_breakdown(self, periods, period_strs, grouped_txs, shapes, anns):
         cat_data = {}
         all_cats = set()
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
             if p_str not in cat_data: cat_data[p_str] = {}
+            entity_nets = self._net_by_entity(p_txs)
             temp_cat_totals = {}
-            for t in p_txs:
-                if self._is_core_expense(t):
-                    c_name = t.category.name
+            for info in entity_nets.values():
+                if info['amount'] < 0:
+                    c_name = info['category_name']
                     all_cats.add(c_name)
-                    temp_cat_totals[c_name] = temp_cat_totals.get(c_name, 0.0) + float(t.amount)
+                    temp_cat_totals[c_name] = temp_cat_totals.get(c_name, 0.0) + info['amount']
             for c, val in temp_cat_totals.items():
-                cat_data[p_str][c] = abs(val) if val < 0 else 0.0
+                cat_data[p_str][c] = abs(val)
         fig = go.Figure()
         for cat in sorted(list(all_cats), reverse=True):
             y_vals = [cat_data.get(m, {}).get(cat, 0) for m in period_strs]
@@ -400,28 +484,45 @@ class DashboardService:
         fig.update_layout(title='Core Expenses by Category (Breakdown)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, legend=dict(traceorder='reversed'), **self.base_layout)
         return to_json(fig, pretty=True)
 
-    def _chart_income_vs_expense(self, periods, period_strs, grouped_txs, shapes, anns):
-        """Building Wealth (Excl. Investments)"""
+    def _chart_wealth_builder(self, periods, period_strs, grouped_txs, shapes, anns):
+        """Building Wealth — cumulative line treats internal flows (transfers, investment in/out) as wealth-neutral."""
+        # Categories representing money moving between the user's own accounts (not real wealth change).
+        INTERNAL_FLOW_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
         regular_inc, investment_withdrawals, c_exp = [], [], []
-        cumulative_surplus = 0.0
-        cumulative_net = []
+        ytd_cumulative = 0.0
+        ytd_net, alltime_net = [], []
+        # Cumulative includes ALL positives (internal inflows fund real spending so let them offset).
+        # Cumulative excludes negatives in INTERNAL_FLOW_CATS (saving/investing isn't wealth loss).
+        prior_offset = self._prior_years_surplus(
+            income_exclude_cats=[EXCLUDED_CAT],
+            expense_exclude_cats=[EXCLUDED_CAT] + list(INTERNAL_FLOW_CATS),
+        )
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
-            regular_inc_val = float(sum(t.amount for t in p_txs if t.amount > 0 and t.category.name != EXCLUDED_CAT and t.category.name != 'Investment'))
+            # Display bars unchanged: Investment broken out separately, Income excludes it.
             invest_withdrawal_val = float(sum(t.amount for t in p_txs if t.amount > 0 and t.category.name == 'Investment'))
-            exp_val = float(abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.name != EXCLUDED_CAT and t.category.name != 'Investment')))
-            current_surplus = regular_inc_val - exp_val
-            cumulative_surplus += current_surplus
+            entity_nets_display = self._net_by_entity(p_txs, exclude_cats=[EXCLUDED_CAT, 'Investment'])
+            regular_inc_val = float(sum(i['amount'] for i in entity_nets_display.values() if i['amount'] > 0))
+            exp_val = float(abs(sum(i['amount'] for i in entity_nets_display.values() if i['amount'] < 0)))
+            # Cumulative calculation (asymmetric exclusion).
+            cum_inc_nets = self._net_by_entity(p_txs, exclude_cats=[EXCLUDED_CAT])
+            cum_exp_nets = self._net_by_entity(p_txs, exclude_cats=list({EXCLUDED_CAT} | INTERNAL_FLOW_CATS))
+            cum_inc = float(sum(i['amount'] for i in cum_inc_nets.values() if i['amount'] > 0))
+            cum_exp = float(abs(sum(i['amount'] for i in cum_exp_nets.values() if i['amount'] < 0)))
+            current_surplus = cum_inc - cum_exp
+            ytd_cumulative += current_surplus
             regular_inc.append(regular_inc_val)
             investment_withdrawals.append(invest_withdrawal_val)
             c_exp.append(exp_val)
-            cumulative_net.append(cumulative_surplus)
+            ytd_net.append(ytd_cumulative)
+            alltime_net.append(prior_offset + ytd_cumulative)
 
         fig = go.Figure()
         fig.add_trace(go.Bar(name='Investment Withdrawals', x=period_strs, y=investment_withdrawals, marker_color='#ef4444'))
         fig.add_trace(go.Bar(name='Income', x=period_strs, y=regular_inc, marker_color='#10b981'))
         fig.add_trace(go.Bar(name='Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
-        fig.add_trace(go.Scatter(name='Cumulative Surplus', x=period_strs, y=cumulative_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.add_trace(go.Scatter(name='YTD Cumulative Surplus', x=period_strs, y=ytd_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.add_trace(go.Scatter(name='Cumulative Surplus (incl. Prior Years)', x=period_strs, y=alltime_net, mode='lines+markers', line=dict(color='#a855f7', width=3, dash='dot'), visible='legendonly'))
         fig.update_layout(
             title='In with Investments vs Out w/o Investments',
             barmode='group',
@@ -465,14 +566,16 @@ class DashboardService:
         fig.update_layout(title='Net Cash Flow', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
         return to_json(fig, pretty=True)
 
-    def _chart_core_summary(self, periods, period_strs, grouped_txs, shapes, anns):
+    def _chart_top_vendors(self, periods, period_strs, grouped_txs, shapes, anns):
+        # Exclude transfers/investments so the Top 20 reflects true *operating* spend, not internal flows.
+        SAVINGS_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
         payee_map = {}
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
-            for t in p_txs:
-                if self._is_core_expense(t):
-                    name = t.entity.name
-                    payee_map[name] = payee_map.get(name, 0.0) + float(t.amount)
+            entity_nets = self._net_by_entity(p_txs, exclude_cats=list({EXCLUDED_CAT} | SAVINGS_CATS))
+            for info in entity_nets.values():
+                if info['amount'] < 0:
+                    payee_map[info['name']] = payee_map.get(info['name'], 0.0) + info['amount']
         sorted_payees = sorted(payee_map.items(), key=lambda item: item[1])[:20]
         sorted_payees = sorted_payees[::-1]
         names = [p[0] for p in sorted_payees]
@@ -481,33 +584,45 @@ class DashboardService:
         fig.update_layout(title='Top 20 Core Operating Payees (Current View)', xaxis=dict(title='Total Spent', tickformat="$,.0f"), margin=self.margin_std, **self.base_layout)
         return to_json(fig, pretty=True)
 
-    def _chart_core_operating(self, periods, period_strs, grouped_txs, shapes, anns):
+    def _chart_full_cashflow(self, periods, period_strs, grouped_txs, shapes, anns):
         c_inc, c_exp = [], []
-        cumulative_surplus = 0.0
-        cumulative_net = []
+        ytd_cumulative = 0.0
+        ytd_net, alltime_net = [], []
+        prior_offset = self._prior_years_surplus(
+            income_exclude_cats=[EXCLUDED_CAT],
+            expense_exclude_cats=[EXCLUDED_CAT],
+        )
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
-            inc_val = float(sum(t.amount for t in p_txs if self._is_core_income(t)))
-            exp_val = float(abs(sum(t.amount for t in p_txs if self._is_core_expense(t))))
+            entity_nets = self._net_by_entity(p_txs)
+            inc_val = float(sum(i['amount'] for i in entity_nets.values() if i['amount'] > 0))
+            exp_val = float(abs(sum(i['amount'] for i in entity_nets.values() if i['amount'] < 0)))
             current_surplus = inc_val - exp_val
-            cumulative_surplus += current_surplus
+            ytd_cumulative += current_surplus
             c_inc.append(inc_val)
             c_exp.append(exp_val)
-            cumulative_net.append(cumulative_surplus)
+            ytd_net.append(ytd_cumulative)
+            alltime_net.append(prior_offset + ytd_cumulative)
 
         fig = go.Figure()
         fig.add_trace(go.Bar(name='Full Income', x=period_strs, y=c_inc, marker_color='#10b981'))
         fig.add_trace(go.Bar(name='Full Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
-        fig.add_trace(go.Scatter(name='Cumulative Surplus', x=period_strs, y=cumulative_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.add_trace(go.Scatter(name='YTD Cumulative Surplus', x=period_strs, y=ytd_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.add_trace(go.Scatter(name='Cumulative Surplus (incl. Prior Years)', x=period_strs, y=alltime_net, mode='lines+markers', line=dict(color='#a855f7', width=3, dash='dot'), visible='legendonly'))
         fig.update_layout(title='Full Income vs Full Expense', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
         return to_json(fig, pretty=True)
 
-    def _chart_groceries(self, periods, period_strs, grouped_txs, shapes, anns):
+    def _chart_food_spending(self, periods, period_strs, grouped_txs, shapes, anns):
         groc, dine = [], []
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
-            groc.append(float(abs(sum(t.amount for t in p_txs if t.category.name == 'Groceries'))))
-            dine.append(float(abs(sum(t.amount for t in p_txs if t.category.name == 'Eat Out'))))
+            entity_nets = self._net_by_entity(p_txs)
+            groc_total = sum(i['amount'] for i in entity_nets.values()
+                             if i['amount'] < 0 and i['category_name'] == 'Groceries')
+            dine_total = sum(i['amount'] for i in entity_nets.values()
+                             if i['amount'] < 0 and i['category_name'] == 'Eat Out')
+            groc.append(float(abs(groc_total)))
+            dine.append(float(abs(dine_total)))
         nonzero_groc = [v for v in groc if v > 0]
         nonzero_dine = [v for v in dine if v > 0]
         avg_groc = sum(nonzero_groc) / len(nonzero_groc) if nonzero_groc else 0
@@ -522,14 +637,13 @@ class DashboardService:
         fig.update_layout(title='Groceries vs. Eating Out', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, **self.base_layout)
         return to_json(fig, pretty=True)
 
-    def _chart_top_payees(self, txs, start_date):
-        income_map = {}
-        for t in txs:
-            name = t.entity.name
-            if (t.date >= start_date and
-                    t.category.name != EXCLUDED_CAT and
-                    t.amount > 0):
-                income_map[name] = income_map.get(name, 0.0) + float(t.amount)
+    def _chart_income_sources(self, txs, start_date, end_date=None):
+        in_range = [t for t in txs
+                    if t.date >= start_date
+                    and (end_date is None or t.date <= end_date)
+                    and t.category.name != EXCLUDED_CAT]
+        entity_nets = self._net_by_entity(in_range)
+        income_map = {info['name']: info['amount'] for info in entity_nets.values() if info['amount'] > 0}
         sorted_sources = sorted(income_map.items(), key=lambda item: item[1], reverse=True)[:10]
         sorted_sources = sorted_sources[::-1]
         names = [p[0] for p in sorted_sources]
@@ -538,18 +652,22 @@ class DashboardService:
         fig.update_layout(title='Top 10 Income Sources (Current View)', xaxis=dict(title='Total Income', tickformat="$,.0f"), margin=self.margin_std, **self.base_layout)
         return to_json(fig, pretty=True)
 
-    def _chart_yoy(self):
+    def _chart_utilities_yoy(self):
         years_to_show = [self.today.year - 2, self.today.year - 1, self.today.year]
         colors = ['#9ca3af', '#f59e0b', '#6366f1']
         fig = go.Figure()
         for i, yr in enumerate(years_to_show):
-            yr_txs = [t for t in self.core_transactions if t.date.year == yr]
+            # Group JEA transactions per (year, month, entity) and net amounts so refunds offset charges
+            yr_jea_txs = [t for t in self.core_transactions
+                          if t.date.year == yr and 'JEA' in t.entity.name.upper()]
+            month_entity_net = {}
+            for t in yr_jea_txs:
+                key = (t.date.month, t.entity_id)
+                month_entity_net[key] = month_entity_net.get(key, 0.0) + float(t.amount)
             monthly_totals = {}
-            for t in yr_txs:
-                p_name = t.entity.name
-                if 'JEA' in p_name.upper() and t.amount < 0:
-                    m = t.date.month
-                    monthly_totals[m] = monthly_totals.get(m, 0.0) + float(t.amount)
+            for (m, _eid), net_amt in month_entity_net.items():
+                if net_amt < 0:
+                    monthly_totals[m] = monthly_totals.get(m, 0.0) + net_amt
             y_vals = []
             for m in range(1, 13):
                 val = monthly_totals.get(m, 0.0)
@@ -561,19 +679,21 @@ class DashboardService:
         fig.update_layout(title='YoY JEA Expenses (3-Year Comparison)', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_cat, margin=self.margin_std, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), **self.base_layout)
         return to_json(fig, pretty=True)
 
-    def _chart_expense_broad(self, periods, period_strs, grouped_txs, shapes, anns):
+    def _chart_savings_rate(self, periods, period_strs, grouped_txs, shapes, anns):
         """Savings Rate Trend - shows percentage of income saved each period"""
         savings_rates = []
         colors = []
         hover_texts = []
 
+        # Exclude internal flows from BOTH sides: investment withdrawals and transfer reversals
+        # are not real income, just money being relocated between your own accounts.
         SAVINGS_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
+        exclude = list({EXCLUDED_CAT} | SAVINGS_CATS)
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
-            p_txs = [t for t in p_txs if t.category.name != EXCLUDED_CAT]
-
-            total_income = sum(t.amount for t in p_txs if t.amount > 0)
-            total_expenses = abs(sum(t.amount for t in p_txs if t.amount < 0 and t.category.name not in SAVINGS_CATS))
+            entity_nets = self._net_by_entity(p_txs, exclude_cats=exclude)
+            total_income = sum(i['amount'] for i in entity_nets.values() if i['amount'] > 0)
+            total_expenses = abs(sum(i['amount'] for i in entity_nets.values() if i['amount'] < 0))
             net_savings = total_income - total_expenses
 
             if total_income > 0:
@@ -625,7 +745,7 @@ class DashboardService:
         )
         return to_json(fig, pretty=True)
 
-    def _chart_passive_income_coverage(self, periods, period_strs, start_date, end_date):
+    def _chart_passive_coverage(self, periods, period_strs, start_date, end_date):
         """Brokerage passive income as % of core monthly expenses."""
         brok_by_period = {}
         for t in self.brokerage_transactions:
