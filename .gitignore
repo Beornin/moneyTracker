@@ -7,3 +7,10 @@ __pycache__/
 instance/
 .DS_Store
 /static
+/build
+/dist
+*.spec.bak
+*.log
+.pytest_cache/
+.vscode/
+.idea/

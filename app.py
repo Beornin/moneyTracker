@@ -4,11 +4,12 @@ import io
 import json
 import shutil
 import subprocess
+import webbrowser
 import pandas as pd
 import requests as http_requests
 from datetime import datetime, date, timedelta
 from urllib.parse import urlparse
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, make_response
 from sqlalchemy import func, extract, case, or_, text, exists
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.attributes import flag_modified
@@ -204,14 +205,33 @@ def upload_file():
                         df = pd.DataFrame(data)
                 else:
                     stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
-                    # Use header parameter based on checkbox
                     df = pd.read_csv(stream, header=0 if csv_has_header else None)
-                    
-                    # CSV Processing Logic
-                    if df.shape[1] >= 5:
-                        df = df.iloc[:, [0, 1, 4]]
-                        df.columns = ['Date', 'Amount', 'Description']
-                    
+
+                    # Map columns by header name if header row present, else fall back to position
+                    if csv_has_header:
+                        # Normalize headers: lowercase, strip whitespace
+                        col_map = {str(c).strip().lower(): c for c in df.columns}
+
+                        date_candidates   = ['date', 'transaction date', 'trans date', 'posted date', 'posting date']
+                        desc_candidates   = ['description', 'memo', 'name', 'transaction description', 'details']
+                        amount_candidates = ['amount', 'transaction amount', 'debit/credit', 'debit', 'credit']
+
+                        date_col   = next((col_map[k] for k in date_candidates   if k in col_map), None)
+                        desc_col   = next((col_map[k] for k in desc_candidates   if k in col_map), None)
+                        amount_col = next((col_map[k] for k in amount_candidates if k in col_map), None)
+
+                        if date_col and desc_col and amount_col:
+                            df = df[[date_col, desc_col, amount_col]].copy()
+                            df.columns = ['Date', 'Description', 'Amount']
+                        else:
+                            # Header present but unrecognized columns — fall back to first 3
+                            df = df.iloc[:, [0, 1, 2]].copy()
+                            df.columns = ['Date', 'Description', 'Amount']
+                    else:
+                        # No header: assume positional Date, Description, Amount
+                        df = df.iloc[:, [0, 1, 2]].copy()
+                        df.columns = ['Date', 'Description', 'Amount']
+
                     # Use manual dates for CSVs if provided
                     if manual_start and manual_end:
                         p_start, p_end = manual_start, manual_end
@@ -1340,6 +1360,226 @@ def api_budget_vs_actual():
         'unbudgeted': unbudgeted
     })
 
+@app.route('/api/budget/pdf_report')
+def api_budget_pdf_report():
+    year = int(request.args.get('year', date.today().year))
+    month = int(request.args.get('month', date.today().month))
+    tolerance_days = max(0, min(10, int(request.args.get('tolerance_days', 3))))
+    plan_id = request.args.get('plan_id')
+
+    if plan_id:
+        plan = db.session.get(BudgetPlan, int(plan_id))
+    else:
+        plan = BudgetPlan.query.options(
+            joinedload(BudgetPlan.line_items).joinedload(BudgetLineItem.category),
+            joinedload(BudgetPlan.line_items).joinedload(BudgetLineItem.entity),
+        ).filter_by(is_active=True).first()
+
+    if not plan:
+        return '<h2 style="font-family:sans-serif;color:red">No active budget plan found.</h2>', 400
+
+    # ── Date math ──
+    month_start = date(year, month, 1)
+    days_in_month = calendar.monthrange(year, month)[1]
+    month_end = date(year, month, days_in_month)
+    today = date.today()
+    is_complete_month = today > month_end
+    if is_complete_month:
+        days_elapsed = days_in_month
+    elif today >= month_start:
+        days_elapsed = min((today - month_start).days + 1, days_in_month)
+    else:
+        days_elapsed = 0
+    pct_elapsed = round(days_elapsed / days_in_month * 100)
+
+    # ── Load transactions (12-month lookback + tolerance extension) ──
+    lookback_start = month_start - timedelta(days=370)
+    extended_end = month_end + timedelta(days=tolerance_days)
+
+    all_txs = Transaction.query.join(Category).outerjoin(Entity).filter(
+        Transaction.is_deleted == False,
+        Transaction.date >= lookback_start,
+        Transaction.date <= extended_end,
+        Category.name != 'Ignored Credit Card Payment'
+    ).all()
+
+    # ── Helpers ──
+    def get_matched_txs(li):
+        result = []
+        for t in all_txs:
+            if li.entity_id:
+                if t.entity_id == li.entity_id:
+                    result.append(t)
+            elif li.category_id and t.category_id == li.category_id:
+                result.append(t)
+        return result
+
+    def check_recurring(txs):
+        """3+ payments at ~monthly intervals (20-45d) in the lookback window."""
+        window = [t for t in txs if t.date <= month_end]
+        window.sort(key=lambda t: t.date)
+        if len(window) < 3:
+            return False
+        gaps = [(window[i+1].date - window[i].date).days for i in range(len(window)-1)]
+        monthly_gaps = [g for g in gaps if 20 <= g <= 45]
+        return len(monthly_gaps) >= max(1, len(gaps) * 0.6)
+
+    def typical_day_of_month(txs):
+        """Median payment day from historical transactions (exclude current month)."""
+        hist = sorted([t for t in txs if t.date < month_start], key=lambda t: t.date)[-12:]
+        if not hist:
+            return 15
+        days = sorted(t.date.day for t in hist)
+        return days[len(days) // 2]
+
+    # ── Sort: entity-specific first ──
+    line_items_raw = BudgetLineItem.query.filter_by(budget_id=plan.id).all()
+    line_items = sorted(line_items_raw, key=lambda x: (0 if x.entity_id else 1, x.label))
+
+    income_items, expense_items = [], []
+    matched_tx_ids = set()
+    totals = dict(expected_income=0.0, actual_income=0.0, expected_expense=0.0, actual_expense=0.0)
+
+    for li in line_items:
+        raw_expected = float(li.expected_amount)
+        frequency = getattr(li, 'frequency', 'monthly')
+        expected_monthly = raw_expected / (12 if frequency == 'annual' else 3 if frequency == 'quarterly' else 1)
+
+        matched_txs = get_matched_txs(li)
+        is_recurring = False
+        cross_note = None
+        actual_display = 0.0
+        projected = 0.0
+
+        if frequency == 'monthly':
+            is_recurring = check_recurring(matched_txs)
+
+            if li.entity_id and is_recurring and tolerance_days > 0:
+                # Smart attribution: find transaction closest to expected day ±tolerance
+                typ_day = typical_day_of_month(matched_txs)
+                clamped_day = min(typ_day, days_in_month)
+                expected_date = date(year, month, clamped_day)
+                win_start = expected_date - timedelta(days=tolerance_days)
+                win_end = expected_date + timedelta(days=tolerance_days)
+
+                candidates = [t for t in matched_txs if win_start <= t.date <= win_end and t.id not in matched_tx_ids]
+                if candidates:
+                    best = min(candidates, key=lambda t: abs((t.date - expected_date).days))
+                    actual_display = abs(float(best.amount))
+                    matched_tx_ids.add(best.id)
+                    if best.date < month_start:
+                        delta = (month_start - best.date).days
+                        cross_note = f'[-{delta}d early]'
+                    elif best.date > month_end:
+                        delta = (best.date - month_end).days
+                        cross_note = f'[+{delta}d late]'
+            else:
+                # Category-linked or non-recurring: sum normal month window
+                for t in matched_txs:
+                    if month_start <= t.date <= month_end and t.id not in matched_tx_ids:
+                        actual_display += abs(float(t.amount))
+                        matched_tx_ids.add(t.id)
+
+            # Project to end of month
+            if is_complete_month or days_elapsed == 0:
+                projected = actual_display
+            else:
+                projected = (actual_display / days_elapsed * days_in_month) if days_elapsed > 0 else 0
+
+        elif frequency in ('annual', 'quarterly'):
+            # Most recent payment, normalized to monthly
+            candidates = [t for t in matched_txs if t.id not in matched_tx_ids]
+            if candidates:
+                best = max(candidates, key=lambda t: t.date)
+                matched_tx_ids.add(best.id)
+                actual_display = abs(float(best.amount)) / (12 if frequency == 'annual' else 3)
+            projected = actual_display
+
+        # Variance and status
+        variance = actual_display - expected_monthly
+        pct_var = round(variance / expected_monthly * 100) if expected_monthly else 0
+
+        if expected_monthly > 0:
+            if li.item_type == 'income':
+                status = 'green' if variance >= 0 else ('yellow' if variance >= -expected_monthly * 0.25 else 'red')
+            else:
+                status = 'green' if variance <= 0 else ('yellow' if variance <= expected_monthly * 0.10 else 'red')
+        else:
+            status = 'neutral'
+
+        linked_to = None
+        if li.entity_id and hasattr(li, 'entity') and li.entity:
+            linked_to = f'Entity: {li.entity.name}'
+        elif li.category_id and hasattr(li, 'category') and li.category:
+            linked_to = f'Cat: {li.category.name}'
+
+        item_data = dict(
+            label=li.label, item_type=li.item_type, notes=li.notes or '',
+            frequency=frequency, expected=round(expected_monthly, 2),
+            actual=round(actual_display, 2), variance=round(variance, 2),
+            pct_variance=pct_var, projected=round(projected, 2),
+            status=status, is_recurring=is_recurring, cross_note=cross_note,
+            linked_to=linked_to
+        )
+
+        if li.item_type == 'income':
+            income_items.append(item_data)
+            totals['expected_income'] += expected_monthly
+            totals['actual_income'] += actual_display
+        else:
+            expense_items.append(item_data)
+            totals['expected_expense'] += expected_monthly
+            totals['actual_expense'] += actual_display
+
+    totals['expected_surplus'] = totals['expected_income'] - totals['expected_expense']
+    totals['actual_surplus'] = totals['actual_income'] - totals['actual_expense']
+
+    # ── Unbudgeted (normal month window only) ──
+    unbudgeted = []
+    for t in all_txs:
+        if (month_start <= t.date <= month_end
+                and t.id not in matched_tx_ids
+                and t.category.name != EXCLUDED_CAT
+                and abs(float(t.amount)) >= 0.50):
+            unbudgeted.append(dict(
+                date=t.date.strftime('%Y-%m-%d'),
+                entity=t.entity.name if t.entity_id and t.entity else 'Unknown',
+                category=t.category.name,
+                amount=float(t.amount)
+            ))
+
+    # Sort: recurring first, then alpha
+    income_items.sort(key=lambda x: (not x['is_recurring'], x['label']))
+    expense_items.sort(key=lambda x: (not x['is_recurring'], x['label']))
+    unbudgeted.sort(key=lambda x: x['date'])
+
+    month_name = date(year, month, 1).strftime('%B')
+    generated_at = datetime.now().strftime('%b %d, %Y %I:%M %p')
+
+    html = render_template('budget_report_print.html',
+        plan_name=plan.name, year=year, month=month,
+        month_name=month_name, tolerance_days=tolerance_days,
+        generated_at=generated_at, days_elapsed=days_elapsed,
+        days_in_month=days_in_month, pct_elapsed=pct_elapsed,
+        is_complete_month=is_complete_month,
+        income_items=income_items, expense_items=expense_items,
+        totals=totals, unbudgeted=unbudgeted
+    )
+
+    # ── WeasyPrint → PDF, fallback to print-HTML ──
+    try:
+        from weasyprint import HTML as WeasyprintHTML
+        pdf_bytes = WeasyprintHTML(string=html, base_url=request.base_url).write_pdf()
+        response = make_response(pdf_bytes)
+        response.headers['Content-Type'] = 'application/pdf'
+        fname = f'budget-{month_name.lower()}-{year}.pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="{fname}"'
+        return response
+    except Exception:
+        # Fallback: return print-optimized HTML (user can Ctrl+P → Save as PDF)
+        return html
+
+
 @app.route('/edit_accounts')
 def edit_accounts():
     accs = Account.query.order_by(Account.name).all()
@@ -1805,4 +2045,9 @@ def restore_db():
 
 if __name__ == '__main__':
     with app.app_context(): create_tables()
+    # Open browser after a short delay to let the server start
+    import threading
+    def open_browser():
+        webbrowser.open('http://127.0.0.1:5001')
+    threading.Timer(1.5, open_browser).start()
     app.run(host='0.0.0.0', port=5001, debug=True)

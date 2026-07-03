@@ -77,6 +77,9 @@
                 <button onclick="showImportModal()" class="px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded-md">
                     <i class="fa-solid fa-file-import mr-1"></i>Import CSV
                 </button>
+                <button onclick="showPdfModal()" class="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-md">
+                    <i class="fa-solid fa-file-pdf mr-1"></i>Download PDF Report
+                </button>
             </div>
         </div>
 
@@ -258,6 +261,54 @@
             <div class="flex gap-2 justify-end mt-4">
                 <button onclick="document.getElementById('importModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md">Cancel</button>
                 <button onclick="importCsv()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md">Import</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF Report Modal -->
+    <div id="pdfModal" class="modal-bg">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                <i class="fa-solid fa-file-pdf mr-2 text-purple-500"></i>Download PDF Budget Report
+            </h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Generates a smart monthly budget report. Recurring bills are detected automatically, and payments that cross a month boundary are attributed to the correct month.</p>
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Year</label>
+                        <select id="pdf-year" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2 text-sm"></select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Month</label>
+                        <select id="pdf-month" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2 text-sm">
+                            <option value="1">January</option><option value="2">February</option>
+                            <option value="3">March</option><option value="4">April</option>
+                            <option value="5">May</option><option value="6">June</option>
+                            <option value="7">July</option><option value="8">August</option>
+                            <option value="9">September</option><option value="10">October</option>
+                            <option value="11">November</option><option value="12">December</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Cross-month tolerance: <span id="pdf-tolerance-label" class="text-purple-600 dark:text-purple-400 font-bold">3</span> days
+                    </label>
+                    <input type="range" id="pdf-tolerance" min="0" max="10" value="3" step="1"
+                        oninput="document.getElementById('pdf-tolerance-label').textContent=this.value"
+                        class="w-full accent-purple-600">
+                    <div class="flex justify-between text-xs text-gray-400 mt-1">
+                        <span>0 (exact month only)</span>
+                        <span>10 days</span>
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Recurring bills paid within this many days of a month boundary will be attributed to the correct budget month.</p>
+                </div>
+            </div>
+            <div class="flex gap-2 justify-end mt-6">
+                <button onclick="document.getElementById('pdfModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md text-sm">Cancel</button>
+                <button onclick="downloadPdfReport()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium">
+                    <i class="fa-solid fa-download mr-1"></i>Generate Report
+                </button>
             </div>
         </div>
     </div>
@@ -514,6 +565,31 @@
             } else {
                 ubSection.classList.add('hidden');
             }
+        }
+
+        function showPdfModal() {
+            const now = new Date();
+            const yearSel = document.getElementById('pdf-year');
+            if (!yearSel.options.length) {
+                for (let y = now.getFullYear(); y >= now.getFullYear() - 3; y--) {
+                    const opt = document.createElement('option');
+                    opt.value = y; opt.textContent = y;
+                    yearSel.appendChild(opt);
+                }
+            }
+            document.getElementById('pdf-year').value = now.getFullYear();
+            document.getElementById('pdf-month').value = now.getMonth() + 1;
+            document.getElementById('pdfModal').classList.add('show');
+        }
+
+        function downloadPdfReport() {
+            const year = document.getElementById('pdf-year').value;
+            const month = document.getElementById('pdf-month').value;
+            const tolerance = document.getElementById('pdf-tolerance').value;
+            const planParam = currentPlanId ? `&plan_id=${currentPlanId}` : '';
+            const url = `/api/budget/pdf_report?year=${year}&month=${month}&tolerance_days=${tolerance}${planParam}`;
+            window.open(url, '_blank');
+            document.getElementById('pdfModal').classList.remove('show');
         }
 
         // Init

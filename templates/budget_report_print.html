@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Budget Report — {{ month_name }} {{ year }}</title>
+    <style>
+        /* ── Base ── */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 11px;
+            color: #111;
+            background: #fff;
+            padding: 24px 32px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        /* ── Header ── */
+        .report-header {
+            border-bottom: 3px solid #1e40af;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+        }
+        .report-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: #1e40af;
+            letter-spacing: 0.5px;
+        }
+        .report-meta {
+            display: flex;
+            gap: 32px;
+            margin-top: 6px;
+            font-size: 10px;
+            color: #555;
+        }
+        .report-meta span strong { color: #111; }
+
+        /* ── Section headings ── */
+        .section-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #fff;
+            padding: 4px 10px;
+            margin-top: 20px;
+            margin-bottom: 0;
+        }
+        .section-income  { background: #166534; }
+        .section-expense { background: #991b1b; }
+
+        /* ── Tables ── */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10.5px;
+        }
+        thead th {
+            background: #f1f5f9;
+            border-bottom: 2px solid #cbd5e1;
+            padding: 5px 8px;
+            text-align: left;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #475569;
+            font-weight: 700;
+        }
+        thead th.num { text-align: right; }
+        tbody tr { border-bottom: 1px solid #e2e8f0; }
+        tbody tr:last-child { border-bottom: 2px solid #cbd5e1; }
+        tbody td { padding: 5px 8px; vertical-align: middle; }
+        tbody td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; }
+        tbody tr:hover { background: #f8fafc; }
+
+        /* Status badges */
+        .badge {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .badge-green  { background: #dcfce7; color: #166534; }
+        .badge-yellow { background: #fef9c3; color: #854d0e; }
+        .badge-red    { background: #fee2e2; color: #991b1b; }
+        .badge-neutral{ background: #f1f5f9; color: #475569; }
+
+        /* Recurring star */
+        .star { color: #d97706; font-size: 10px; }
+
+        /* Cross-month note */
+        .cross-note { font-size: 8px; color: #6b7280; margin-left: 4px; font-style: italic; }
+
+        /* Variance color */
+        .var-good { color: #166534; font-weight: 600; }
+        .var-bad  { color: #991b1b; font-weight: 600; }
+        .var-neutral { color: #475569; }
+
+        /* Totals row */
+        .totals-row td {
+            font-weight: 700;
+            font-size: 11px;
+            background: #f8fafc;
+            border-top: 2px solid #475569 !important;
+            border-bottom: none !important;
+        }
+
+        /* ── Summary box ── */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-top: 24px;
+        }
+        .summary-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px 12px;
+        }
+        .summary-card .label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; }
+        .summary-card .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+        .summary-card .sub   { font-size: 9px; color: #6b7280; margin-top: 1px; }
+        .card-income  { border-top: 3px solid #166534; }
+        .card-expense { border-top: 3px solid #991b1b; }
+        .card-surplus { border-top: 3px solid #1e40af; }
+        .card-unbudgeted { border-top: 3px solid #d97706; }
+        .income-val  { color: #166534; }
+        .expense-val { color: #991b1b; }
+        .surplus-val-pos { color: #1e40af; }
+        .surplus-val-neg { color: #991b1b; }
+
+        /* ── Unbudgeted section ── */
+        .unbudgeted-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #d97706;
+            margin-top: 20px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .unbudgeted-title::before {
+            content: '⚠';
+            font-size: 12px;
+        }
+
+        /* ── Legend ── */
+        .legend {
+            margin-top: 24px;
+            padding-top: 10px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 9px;
+            color: #6b7280;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .legend-item strong { color: #374151; }
+
+        /* ── Print overrides ── */
+        @media print {
+            body { padding: 0; }
+            @page { margin: 1.5cm 1.5cm; size: Letter; }
+            .no-print { display: none !important; }
+            tbody tr:hover { background: transparent; }
+            .badge-green  { border: 1px solid #166534; }
+            .badge-yellow { border: 1px solid #854d0e; }
+            .badge-red    { border: 1px solid #991b1b; }
+            .badge-neutral{ border: 1px solid #475569; }
+        }
+        @media screen {
+            .print-only { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <!-- ── Header ── -->
+    <div class="report-header">
+        <div class="report-title">Monthly Budget Report &mdash; {{ month_name }} {{ year }}</div>
+        <div class="report-meta">
+            <span><strong>Plan:</strong> {{ plan_name }}</span>
+            <span><strong>Tolerance:</strong> &plusmn;{{ tolerance_days }} days</span>
+            <span><strong>Generated:</strong> {{ generated_at }}</span>
+            {% if pct_elapsed < 100 %}
+            <span><strong>Month Progress:</strong> {{ days_elapsed }}/{{ days_in_month }} days ({{ pct_elapsed }}%)</span>
+            {% else %}
+            <span><strong>Month:</strong> Complete</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ── No-print buttons (screen only) ── -->
+    <div class="no-print" style="margin-bottom:16px; display:flex; gap:10px;">
+        <button onclick="window.print()" style="padding:6px 16px; background:#1e40af; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600;">
+            &#128438; Print / Save as PDF
+        </button>
+        <button onclick="window.close()" style="padding:6px 16px; background:#6b7280; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;">
+            Close
+        </button>
+    </div>
+
+    <!-- ── INCOME ── -->
+    {% if income_items %}
+    <div class="section-title section-income">&#9654; Income</div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width:30%">Item</th>
+                <th>Linked To</th>
+                <th class="num">Expected</th>
+                <th class="num">Actual</th>
+                <th class="num">Variance</th>
+                {% if not is_complete_month %}<th class="num">Projected</th>{% endif %}
+                <th style="text-align:center">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in income_items %}
+            <tr>
+                <td>
+                    {% if item.is_recurring %}<span class="star">&#9733;</span> {% endif %}
+                    {{ item.label }}
+                    {% if item.cross_note %}<span class="cross-note">{{ item.cross_note }}</span>{% endif %}
+                    {% if item.notes %}<br><span style="font-size:9px;color:#9ca3af;">{{ item.notes }}</span>{% endif %}
+                </td>
+                <td style="font-size:9px; color:#4f46e5;">{{ item.linked_to or '—' }}</td>
+                <td class="num">${{ "%.2f"|format(item.expected) }}</td>
+                <td class="num" style="font-weight:600;">${{ "%.2f"|format(item.actual) }}</td>
+                <td class="num {% if item.variance >= 0 %}var-good{% elif item.variance >= -item.expected * 0.25 %}var-neutral{% else %}var-bad{% endif %}">
+                    {{ '+' if item.variance >= 0 else '' }}${{ "%.2f"|format(item.variance) }}
+                </td>
+                {% if not is_complete_month %}
+                <td class="num" style="color:#6b7280;">${{ "%.2f"|format(item.projected) }}</td>
+                {% endif %}
+                <td style="text-align:center;">
+                    <span class="badge badge-{{ item.status }}">
+                        {% if item.status == 'green' %}&#10003; OK
+                        {% elif item.status == 'yellow' %}&#9888; Watch
+                        {% elif item.status == 'red' %}&#10007; Over
+                        {% else %}&mdash;{% endif %}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+            <tr class="totals-row">
+                <td colspan="2">Total Income</td>
+                <td class="num">${{ "%.2f"|format(totals.expected_income) }}</td>
+                <td class="num">${{ "%.2f"|format(totals.actual_income) }}</td>
+                <td class="num {% if totals.actual_income >= totals.expected_income %}var-good{% else %}var-bad{% endif %}">
+                    {{ '+' if totals.actual_income - totals.expected_income >= 0 else '' }}${{ "%.2f"|format(totals.actual_income - totals.expected_income) }}
+                </td>
+                {% if not is_complete_month %}<td class="num"></td>{% endif %}
+                <td></td>
+            </tr>
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- ── EXPENSES ── -->
+    {% if expense_items %}
+    <div class="section-title section-expense" style="margin-top:16px;">&#9654; Expenses</div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width:30%">Item</th>
+                <th>Linked To</th>
+                <th class="num">Expected</th>
+                <th class="num">Actual</th>
+                <th class="num">Variance</th>
+                {% if not is_complete_month %}<th class="num">Projected</th>{% endif %}
+                <th style="text-align:center">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in expense_items %}
+            <tr>
+                <td>
+                    {% if item.is_recurring %}<span class="star">&#9733;</span> {% endif %}
+                    {{ item.label }}
+                    {% if item.cross_note %}<span class="cross-note">{{ item.cross_note }}</span>{% endif %}
+                    {% if item.notes %}<br><span style="font-size:9px;color:#9ca3af;">{{ item.notes }}</span>{% endif %}
+                </td>
+                <td style="font-size:9px; color:#4f46e5;">{{ item.linked_to or '—' }}</td>
+                <td class="num">${{ "%.2f"|format(item.expected) }}</td>
+                <td class="num" style="font-weight:600;">${{ "%.2f"|format(item.actual) }}</td>
+                <td class="num {% if item.variance <= 0 %}var-good{% elif item.variance <= item.expected * 0.1 %}var-neutral{% else %}var-bad{% endif %}">
+                    {{ '+' if item.variance >= 0 else '' }}${{ "%.2f"|format(item.variance) }}
+                </td>
+                {% if not is_complete_month %}
+                <td class="num" style="color:#6b7280;">${{ "%.2f"|format(item.projected) }}</td>
+                {% endif %}
+                <td style="text-align:center;">
+                    <span class="badge badge-{{ item.status }}">
+                        {% if item.status == 'green' %}&#10003; OK
+                        {% elif item.status == 'yellow' %}&#9888; Watch
+                        {% elif item.status == 'red' %}&#10007; Over
+                        {% else %}&mdash;{% endif %}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+            <tr class="totals-row">
+                <td colspan="2">Total Expenses</td>
+                <td class="num">${{ "%.2f"|format(totals.expected_expense) }}</td>
+                <td class="num">${{ "%.2f"|format(totals.actual_expense) }}</td>
+                <td class="num {% if totals.actual_expense <= totals.expected_expense %}var-good{% else %}var-bad{% endif %}">
+                    {{ '+' if totals.actual_expense - totals.expected_expense >= 0 else '' }}${{ "%.2f"|format(totals.actual_expense - totals.expected_expense) }}
+                </td>
+                {% if not is_complete_month %}<td class="num"></td>{% endif %}
+                <td></td>
+            </tr>
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- ── Summary Cards ── -->
+    <div class="summary-grid">
+        <div class="summary-card card-income">
+            <div class="label">Total Income</div>
+            <div class="value income-val">${{ "%.0f"|format(totals.actual_income) }}</div>
+            <div class="sub">of ${{ "%.0f"|format(totals.expected_income) }} expected</div>
+        </div>
+        <div class="summary-card card-expense">
+            <div class="label">Total Expenses</div>
+            <div class="value expense-val">${{ "%.0f"|format(totals.actual_expense) }}</div>
+            <div class="sub">of ${{ "%.0f"|format(totals.expected_expense) }} expected</div>
+        </div>
+        <div class="summary-card card-surplus">
+            <div class="label">Net Surplus</div>
+            <div class="value {{ 'surplus-val-pos' if totals.actual_surplus >= 0 else 'surplus-val-neg' }}">
+                {{ '+' if totals.actual_surplus >= 0 else '' }}${{ "%.0f"|format(totals.actual_surplus) }}
+            </div>
+            <div class="sub">expected {{ '+' if totals.expected_surplus >= 0 else '' }}${{ "%.0f"|format(totals.expected_surplus) }}</div>
+        </div>
+        <div class="summary-card card-unbudgeted">
+            <div class="label">Unbudgeted Spend</div>
+            <div class="value" style="color:#d97706;">{{ unbudgeted|length }}</div>
+            <div class="sub">transactions not in plan</div>
+        </div>
+    </div>
+
+    <!-- ── Unbudgeted Transactions ── -->
+    {% if unbudgeted %}
+    <div class="unbudgeted-title">Unbudgeted Transactions ({{ unbudgeted|length }})</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Entity</th>
+                <th>Category</th>
+                <th class="num">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in unbudgeted %}
+            <tr>
+                <td>{{ u.date }}</td>
+                <td>{{ u.entity }}</td>
+                <td style="color:#6b7280;">{{ u.category }}</td>
+                <td class="num {{ 'var-bad' if u.amount < 0 else 'var-good' }}">${{ "%.2f"|format(u.amount|abs) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- ── Legend ── -->
+    <div class="legend">
+        <span class="legend-item"><strong>&#9733;</strong> = Verified recurring monthly (3+ payments at ~30-day intervals)</span>
+        <span class="legend-item"><strong>[+Nd]</strong> = Payment attributed from next-month window</span>
+        <span class="legend-item"><strong>[-Nd]</strong> = Payment attributed from prior-month window</span>
+        <span class="legend-item"><span class="badge badge-green" style="display:inline;">&#10003; OK</span> = Within budget</span>
+        <span class="legend-item"><span class="badge badge-yellow" style="display:inline;">&#9888; Watch</span> = Up to 10% over</span>
+        <span class="legend-item"><span class="badge badge-red" style="display:inline;">&#10007; Over</span> = &gt;10% over budget</span>
+    </div>
+
+    <script>
+        // Auto-print if opened via WeasyPrint fallback flag
+        if (window.location.search.includes('autoprint=1')) {
+            window.addEventListener('load', () => { window.print(); });
+        }
+    </script>
+</body>
+</html>

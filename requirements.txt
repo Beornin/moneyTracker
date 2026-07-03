@@ -8,3 +8,5 @@ numpy
 gunicorn
 python-dotenv
 requests
+pyinstaller
+weasyprint

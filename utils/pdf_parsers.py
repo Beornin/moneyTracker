@@ -31,7 +31,7 @@ def parse_fidelity_csv(file_stream):
     TREASURY_KEYWORDS = ('TREAS', 'UNITED STATES', 'ZERO CPN')
 
     try:
-        text = file_stream.read().decode('utf-8', errors='replace')
+        text = file_stream.read().decode('utf-8-sig', errors='replace')
         lines = text.splitlines()
 
         header_idx = None
@@ -103,9 +103,14 @@ def parse_fidelity_csv(file_stream):
                     continue
 
             raw_date = (row.get('Run Date') or '').strip()
-            try:
-                tx_date = datetime.strptime(raw_date, '%m/%d/%Y').date()
-            except ValueError:
+            tx_date = None
+            for _fmt in ('%m/%d/%Y', '%m-%d-%Y'):
+                try:
+                    tx_date = datetime.strptime(raw_date, _fmt).date()
+                    break
+                except ValueError:
+                    continue
+            if tx_date is None:
                 continue
 
             if symbol and len(symbol) <= 5 and symbol.isalpha():

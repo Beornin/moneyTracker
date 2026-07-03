@@ -58,3 +58,26 @@ cd finance-app
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+## 🏗️ Building the Windows Executable (dist/)
+
+The app can be packaged into a standalone Windows exe using PyInstaller, so it can run without an active Python environment (PostgreSQL is still required separately).
+
+### Prerequisites
+* `pip install pyinstaller` (already listed in `requirements.txt`)
+* Use the project's `venv` (the one at `venv/Scripts/python.exe`) — do not use `.venv`, which is stale/unused.
+
+### Build steps
+```bash
+venv\Scripts\python.exe -m PyInstaller money_tracker.spec --noconfirm
+```
+* Use `money_tracker.spec` (not `MoneyTracker.spec`, which is an older/unused duplicate).
+* Output is written to `dist/MoneyTracker.exe`.
+* Build artifacts are cached in `build/` — safe to delete if you want a clean rebuild.
+
+### After building
+* Copy your `.env` file (with `DATABASE_URL`) into the `dist/` folder next to `MoneyTracker.exe`, or set `DATABASE_URL` as a system environment variable.
+* Double-click `MoneyTracker.exe` to launch; the app serves at `http://127.0.0.1:5000`.
+* PostgreSQL must be installed/running and reachable via `DATABASE_URL`.
+* See `dist/README_EXE.txt` for end-user run/troubleshooting instructions.
