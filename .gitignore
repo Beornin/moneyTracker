@@ -6,11 +6,14 @@ __pycache__/
 *.pyc
 instance/
 .DS_Store
-/static
+/static/css/fontawesome
+/static/js/tailwind.js
 /build
 /dist
 *.spec.bak
 *.log
+*.err
+server.err
 .pytest_cache/
 .vscode/
 .idea/

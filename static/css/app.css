@@ -1,0 +1,46 @@
+/* Shared, hand-written CSS for things Tailwind utility classes don't cover:
+   spinners and scrollbar theming. Everything else in the app uses Tailwind
+   utility classes directly (consistent by convention, not by component
+   class) since pages load Tailwind via the Play CDN, which can't process
+   custom @apply-based classes from an external stylesheet. */
+
+@keyframes app-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.app-spinner {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border: 4px solid #e5e7eb;
+    border-top-color: #4f46e5;
+    border-radius: 50%;
+    animation: app-spin 1s linear infinite;
+}
+
+.dark .app-spinner {
+    border-color: #374151;
+    border-top-color: #6366f1;
+}
+
+.app-spinner-sm {
+    width: 24px;
+    height: 24px;
+    border-width: 3px;
+}
+
+/* Module-branded variant (retirement uses emerald as its accent color) */
+.app-spinner-emerald {
+    border-top-color: #10b981;
+}
+.dark .app-spinner-emerald {
+    border-top-color: #34d399;
+}
+
+/* Thin themed scrollbar for scrollable filter lists / sidebars */
+.thin-scrollbar::-webkit-scrollbar { width: 6px; }
+.thin-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+.dark .thin-scrollbar::-webkit-scrollbar-track { background: #1f2937; }
+.thin-scrollbar::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+.dark .thin-scrollbar::-webkit-scrollbar-thumb { background: #4b5563; }

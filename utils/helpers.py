@@ -1,5 +1,7 @@
 import calendar
+import re
 from datetime import datetime, date
+import pandas as pd
 from models import db, Category, Entity, Transaction
 
 
@@ -23,6 +25,77 @@ def try_parse_date(date_str):
         except ValueError:
             continue
     return None
+
+
+def _sniff_try_date(val):
+    """Best-effort date check for column sniffing. None if val isn't date-like."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() == 'nan':
+        return None
+    return try_parse_date(s)
+
+
+def _sniff_try_amount(val):
+    """Best-effort currency check for column sniffing. None if val isn't amount-like."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() == 'nan':
+        return None
+    neg = False
+    if s.startswith('(') and s.endswith(')'):
+        neg = True
+        s = s[1:-1].strip()
+    s = s.replace('$', '').replace(',', '').strip()
+    if s.startswith('-'):
+        neg = True
+        s = s[1:]
+    elif s.startswith('+'):
+        s = s[1:]
+    if not s or not re.fullmatch(r'\d+(\.\d+)?', s):
+        return None
+    n = float(s)
+    return -n if neg else n
+
+
+def sniff_transaction_columns(df):
+    """
+    Identify the Date, Description, and Amount columns by sampling their actual
+    values instead of trusting column position or header names. Lets bank CSVs
+    that reorder columns (or omit a header row entirely) still import correctly.
+
+    Returns a DataFrame with columns ['Date', 'Description', 'Amount'], or None
+    if the columns can't be identified with reasonable confidence.
+    """
+    if df.shape[1] < 3 or len(df) == 0:
+        return None
+
+    sample = df.head(30)
+    n = len(sample)
+
+    date_hits = {c: sum(1 for v in sample[c] if _sniff_try_date(v) is not None) for c in df.columns}
+    amount_hits = {c: sum(1 for v in sample[c] if _sniff_try_amount(v) is not None) for c in df.columns}
+
+    date_col = max(date_hits, key=date_hits.get)
+    if date_hits[date_col] / n < 0.8:
+        return None
+
+    amount_col = max((c for c in df.columns if c != date_col), key=lambda c: amount_hits[c])
+    if amount_hits[amount_col] / n < 0.8:
+        return None
+
+    desc_candidates = [c for c in df.columns if c not in (date_col, amount_col)]
+    if not desc_candidates:
+        return None
+    desc_col = max(desc_candidates, key=lambda c: sample[c].astype(str).map(len).mean())
+
+    return pd.DataFrame({
+        'Date': df[date_col].values,
+        'Description': df[desc_col].values,
+        'Amount': df[amount_col].values,
+    })
 
 
 def find_or_create_entity(description, amount, uncat_id):

@@ -1,0 +1,11 @@
+<script>
+(function () {
+    var c = document.getElementById('flash-container');
+    if (!c) return;
+    setTimeout(function () {
+        c.style.transition = 'opacity 0.5s ease';
+        c.style.opacity = '0';
+        setTimeout(function () { c.innerHTML = ''; }, 500);
+    }, 5000);
+})();
+</script>

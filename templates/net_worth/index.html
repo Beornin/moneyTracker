@@ -1,0 +1,274 @@
+{%- from 'partials/_macros.html' import back_link, nav_pill -%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Net Worth</title>
+    {% include 'partials/_head_common.html' %}
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 font-sans min-h-screen transition-colors duration-200">
+<div class="container mx-auto max-w-7xl p-6">
+
+    <div class="flex flex-wrap justify-between items-center mb-6 border-b dark:border-gray-700 pb-4 gap-3">
+        <h1 class="text-3xl font-extrabold text-gray-900 dark:text-white">
+            <i class="fa-solid fa-scale-balanced mr-3 text-fuchsia-500"></i>Net Worth
+        </h1>
+        <div class="flex flex-wrap gap-2">
+            {{ back_link(url_for('index'), 'Dashboard') }}
+            {{ nav_pill(url_for('net_worth.checkup'), 'fa-clipboard-check', 'Checkup', 'indigo') }}
+            <button type="button" onclick="document.getElementById('addAccountForm').classList.toggle('hidden')" class="flex items-center text-sm font-medium px-4 py-2 bg-fuchsia-600 text-white rounded-lg hover:bg-fuchsia-700 transition duration-150">
+                <i class="fa-solid fa-plus mr-2"></i>Add Account
+            </button>
+        </div>
+    </div>
+
+    {% include 'partials/_flash.html' %}
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div class="p-5 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800">
+            <div class="text-xs text-green-600 dark:text-green-400 font-semibold uppercase tracking-wide">Total Assets</div>
+            <div class="text-2xl font-bold text-green-700 dark:text-green-300">${{ "{:,.0f}".format(summary.total_assets) }}</div>
+        </div>
+        <div class="p-5 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800">
+            <div class="text-xs text-red-600 dark:text-red-400 font-semibold uppercase tracking-wide">Total Debts</div>
+            <div class="text-2xl font-bold text-red-700 dark:text-red-300">${{ "{:,.0f}".format(summary.total_debts) }}</div>
+        </div>
+        <div class="p-5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800">
+            <div class="text-xs text-indigo-600 dark:text-indigo-400 font-semibold uppercase tracking-wide">Net Worth</div>
+            <div class="text-2xl font-bold text-indigo-700 dark:text-indigo-300">${{ "{:,.0f}".format(summary.net_worth) }}</div>
+        </div>
+    </div>
+
+    <!-- Add Account (hidden by default) -->
+    <div id="addAccountForm" class="hidden bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4"><i class="fa-solid fa-plus mr-2 text-fuchsia-500"></i>Add Account</h2>
+        <form method="POST" action="{{ url_for('net_worth.add_account') }}" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Type</label>
+                <select name="item_type" id="itemTypeSelect" onchange="toggleCategoryList()" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                    <option value="asset">Asset</option>
+                    <option value="debt">Debt</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Owner</label>
+                <input type="text" name="owner" required list="owner-list" placeholder="e.g. Joint" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                <datalist id="owner-list">
+                    {% for o in owners %}<option value="{{ o }}">{% endfor %}
+                </datalist>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Name</label>
+                <input type="text" name="name" required placeholder="e.g. Fidelity Roth IRA" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Category</label>
+                <select name="category" id="assetCategorySelect" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                    {% for c in asset_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                </select>
+                <select name="category" id="debtCategorySelect" disabled class="hidden w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                    {% for c in debt_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Starting Balance ($)</label>
+                <input type="number" step="0.01" name="balance" required class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white text-right">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">As Of Date</label>
+                <input type="date" name="as_of_date" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white" id="asOfDateInput">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Institution</label>
+                <input type="text" name="institution" placeholder="e.g. Fidelity" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Account Number</label>
+                <input type="text" name="account_number" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Online Access Link</label>
+                <input type="url" name="online_access_url" placeholder="https://..." class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Liquidity Horizon</label>
+                <select name="liquidity_horizon" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white">
+                    <option value="">—</option>
+                    {% for h in horizons %}<option value="{{ h }}">{{ h.replace('_', '-').title() }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="flex items-center gap-2 pt-6">
+                <input type="checkbox" name="include_in_net_worth" id="includeCheckbox" checked class="rounded border-gray-300 dark:border-gray-600">
+                <label for="includeCheckbox" class="text-sm text-gray-700 dark:text-gray-300">Count toward net worth total</label>
+            </div>
+            <div class="md:col-span-3">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Notes</label>
+                <textarea name="notes" rows="2" class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white"></textarea>
+            </div>
+            <div class="md:col-span-3">
+                <button type="submit" class="px-5 py-2 bg-fuchsia-600 text-white font-medium rounded-lg hover:bg-fuchsia-700 transition-colors">
+                    <i class="fa-solid fa-floppy-disk mr-2"></i>Save Account
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Net Worth Over Time Chart -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 border border-gray-200 dark:border-gray-700 mb-6">
+        {% if chart_net_worth %}
+            <div id="chart-net-worth" style="height: 380px;"></div>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">Note: this chart is built entirely from manually recorded snapshots — record a checkup periodically to build up history.</p>
+        {% else %}
+            <div class="text-center py-10 text-gray-400 dark:text-gray-500">
+                <i class="fa-solid fa-chart-line text-3xl mb-3"></i>
+                <p>No history yet — record at least one checkup to see the net worth trend over time.</p>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Horizon + Category Breakdown Charts -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 border border-gray-200 dark:border-gray-700">
+            {% if chart_horizon %}
+                <div id="chart-horizon" style="height: 320px;"></div>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">How much of your net worth is immediately accessible ("Now") vs. locked up for the long term.</p>
+            {% else %}
+                <div class="text-center py-10 text-gray-400 dark:text-gray-500">
+                    <i class="fa-solid fa-hourglass-half text-3xl mb-3"></i>
+                    <p>Set a liquidity horizon on your accounts to see this breakdown.</p>
+                </div>
+            {% endif %}
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 border border-gray-200 dark:border-gray-700">
+            {% if chart_category %}
+                <div id="chart-category" style="height: 380px;"></div>
+            {% else %}
+                <div class="text-center py-10 text-gray-400 dark:text-gray-500">
+                    <i class="fa-solid fa-chart-pie text-3xl mb-3"></i>
+                    <p>Add an asset with a balance to see its category composition.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% macro account_table(grouped, categories) %}
+        {% for owner, rows in grouped.items() %}
+        <div class="mb-4">
+            <h3 class="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">{{ owner }}</h3>
+            <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                    <thead class="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Name</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Category</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Institution</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Horizon</th>
+                            <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Count</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Balance</th>
+                            <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        {% for account, balance in rows %}
+                        {% set fid = 'edit-form-' ~ account.id %}
+                        <tr class="{% if not account.include_in_net_worth %}opacity-50{% endif %}">
+                            <td class="px-4 py-2">
+                                <form id="{{ fid }}" action="{{ url_for('net_worth.update_account', account_id=account.id) }}" method="POST" class="hidden"></form>
+                                <input type="text" name="name" form="{{ fid }}" value="{{ account.name }}" required
+                                       class="w-full px-2 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+                                {% if account.online_access_url %}
+                                    <a href="{{ account.online_access_url }}" target="_blank" rel="noopener" class="ml-1 text-xs text-blue-500 hover:underline"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-2">
+                                <select name="category" form="{{ fid }}" class="w-full px-2 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+                                    {% for c in categories %}<option value="{{ c }}" {% if account.category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                                </select>
+                            </td>
+                            <td class="px-4 py-2">
+                                <input type="text" name="institution" form="{{ fid }}" value="{{ account.institution or '' }}"
+                                       class="w-full px-2 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+                            </td>
+                            <td class="px-4 py-2">
+                                <select name="liquidity_horizon" form="{{ fid }}" class="w-full px-2 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-900 dark:text-white">
+                                    <option value="">—</option>
+                                    {% for h in horizons %}<option value="{{ h }}" {% if account.liquidity_horizon == h %}selected{% endif %}>{{ h.replace('_', '-').title() }}</option>{% endfor %}
+                                </select>
+                            </td>
+                            <td class="px-4 py-2 text-center">
+                                <input type="hidden" name="include_in_net_worth_present" form="{{ fid }}" value="1">
+                                <input type="checkbox" name="include_in_net_worth" form="{{ fid }}" {% if account.include_in_net_worth %}checked{% endif %}
+                                       class="rounded border-gray-300 dark:border-gray-600">
+                            </td>
+                            <td class="px-4 py-2 text-right font-mono text-gray-900 dark:text-white whitespace-nowrap">
+                                {% if balance is none %}<span class="text-gray-400">no data</span>{% else %}${{ "{:,.2f}".format(balance) }}{% endif %}
+                            </td>
+                            <td class="px-4 py-2 text-center whitespace-nowrap">
+                                <button type="submit" form="{{ fid }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 text-xs mr-2" title="Save"><i class="fa-solid fa-floppy-disk"></i></button>
+                                <a href="{{ url_for('net_worth.account_history', account_id=account.id) }}" class="text-blue-600 dark:text-blue-400 hover:underline text-xs mr-2" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>
+                                <form method="POST" action="{{ url_for('net_worth.archive_account', account_id=account.id) }}" class="inline" onsubmit="return confirm('Archive {{ account.name }}? It will be hidden but its history is kept.')">
+                                    <button class="text-amber-600 hover:text-amber-800 dark:text-amber-400 text-xs mr-2" title="Archive"><i class="fa-solid fa-box-archive"></i></button>
+                                </form>
+                                <form method="POST" action="{{ url_for('net_worth.delete_account', account_id=account.id) }}" class="inline" onsubmit="return confirm('Delete {{ account.name }} and all its history? This cannot be undone.')">
+                                    <button class="text-red-600 hover:text-red-800 dark:text-red-400 text-xs" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    {% endmacro %}
+
+    <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3"><i class="fa-solid fa-sack-dollar mr-2 text-green-500"></i>Assets</h2>
+    {% if summary.assets_by_owner %}
+        {{ account_table(summary.assets_by_owner, asset_categories) }}
+    {% else %}
+        <p class="text-gray-400 dark:text-gray-500 text-sm mb-6">No assets tracked yet.</p>
+    {% endif %}
+
+    <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3 mt-6"><i class="fa-solid fa-file-invoice-dollar mr-2 text-red-500"></i>Debts</h2>
+    {% if summary.debts_by_owner %}
+        {{ account_table(summary.debts_by_owner, debt_categories) }}
+    {% else %}
+        <p class="text-gray-400 dark:text-gray-500 text-sm mb-6">No debts tracked yet.</p>
+    {% endif %}
+
+</div>
+
+<script>
+    document.getElementById('asOfDateInput').valueAsDate = new Date();
+
+    function toggleCategoryList() {
+        const isDebt = document.getElementById('itemTypeSelect').value === 'debt';
+        const assetSel = document.getElementById('assetCategorySelect');
+        const debtSel = document.getElementById('debtCategorySelect');
+        assetSel.classList.toggle('hidden', isDebt);
+        assetSel.disabled = isDebt;
+        debtSel.classList.toggle('hidden', !isDebt);
+        debtSel.disabled = !isDebt;
+    }
+
+    function renderNwChart(divId, chartData) {
+        if (!chartData) return;
+        const isDark = document.documentElement.classList.contains('dark');
+        const layout = Object.assign({}, chartData.layout, {
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { color: isDark ? '#d1d5db' : '#374151' }
+        });
+        Plotly.newPlot(divId, chartData.data, layout, {responsive: true});
+    }
+
+    renderNwChart('chart-net-worth', {{ chart_net_worth|safe if chart_net_worth else 'null' }});
+    renderNwChart('chart-horizon', {{ chart_horizon|safe if chart_horizon else 'null' }});
+    renderNwChart('chart-category', {{ chart_category|safe if chart_category else 'null' }});
+</script>
+{% include 'partials/_flash_dismiss.html' %}
+</body>
+</html>

@@ -1,30 +1,11 @@
+{%- from 'partials/_macros.html' import back_link -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dates of Interest</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = { darkMode: 'class' }
-    </script>
-    
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-
-    <script>
-        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-    </script>
-    <style>
-        .flash { padding: 1rem; margin-bottom: 1rem; border-radius: 0.375rem; }
-        .flash.success { background-color: #d1fae5; color: #065f46; }
-        .flash.danger { background-color: #fee2e2; color: #991b1b; }
-        .dark .flash.success { background-color: #064e3b; color: #d1fae5; }
-        .dark .flash.danger { background-color: #7f1d1d; color: #fee2e2; }
-    </style>
+    {% include 'partials/_head_common.html' %}
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 font-sans leading-normal tracking-normal min-h-screen transition-colors duration-200">
 
@@ -35,25 +16,10 @@
         </h1>
 
         <div class="flex justify-between items-center mb-6">
-            <a href="{{ url_for('index') }}" class="flex items-center text-sm font-medium px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
-                <i class="fa-solid fa-arrow-left mr-2"></i>
-                Back to Dashboard
-            </a>
-            <div></div>
+            {{ back_link(url_for('index')) }}
         </div>
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <div class="mb-6">
-                    {% for category, message in messages %}
-                        <div class="flash {{ category }} flex items-center">
-                            <i class="fa-solid {% if category == 'success' %}fa-check-circle{% else %}fa-exclamation-triangle{% endif %} mr-3 w-5 h-5"></i>
-                            <span>{{ message | safe }}</span>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% endif %}
-        {% endwith %}
+        {% include 'partials/_flash.html' %}
         
         <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 border border-gray-200 dark:border-gray-700">
             <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-4">
@@ -84,11 +50,11 @@
         </div>
 
         <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-            <i class="fa-solid fa-list-check mr-2"></i>Recorded Events
+            <i class="fa-solid fa-list-check mr-2 text-gray-500 dark:text-gray-400"></i>Recorded Events
         </h2>
-        
+
         {% if events %}
-            <div class="bg-white dark:bg-gray-800 shadow-xl rounded-xl overflow-hidden">
+            <div class="bg-white dark:bg-gray-800 shadow-xl rounded-lg overflow-hidden">
                 <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                     <thead class="bg-gray-50 dark:bg-gray-700">
                         <tr>
@@ -99,7 +65,7 @@
                     </thead>
                     <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                         {% for event in events %}
-                        <tr class="hover:bg-pink-50 dark:hover:bg-pink-900/20 transition">
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
                                 {{ event.date.strftime('%Y-%m-%d') }}
                             </td>
@@ -107,9 +73,9 @@
                                 {{ event.description }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <form action="{{ url_for('delete_event', eid=event.id) }}" method="POST" onsubmit="return confirm('Delete this event?');">
-                                    <button type="submit" class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 flex items-center justify-end w-full">
-                                        <i class="fa-solid fa-trash-can mr-2"></i>Delete
+                                <form action="{{ url_for('delete_event', eid=event.id) }}" method="POST" onsubmit="return confirm('Delete this event?');" class="inline-flex justify-end">
+                                    <button type="submit" title="Delete" class="p-2 rounded-lg text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors">
+                                        <i class="fa-solid fa-trash-can"></i>
                                     </button>
                                 </form>
                             </td>
@@ -126,5 +92,6 @@
         {% endif %}
 
     </div>
+    {% include 'partials/_flash_dismiss.html' %}
 </body>
 </html>

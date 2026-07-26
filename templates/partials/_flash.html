@@ -1,0 +1,21 @@
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div id="flash-container" class="space-y-2 mb-6">
+        {% for category, message in messages %}
+            {% set variant = category if category in ['success', 'danger', 'warning', 'info'] else 'info' %}
+            <div class="flash-msg flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium
+                {% if variant == 'success' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                {% elif variant == 'danger' %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200
+                {% elif variant == 'warning' %}bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200
+                {% else %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% endif %}">
+                <i class="fa-solid
+                    {% if variant == 'success' %}fa-check-circle
+                    {% elif variant == 'danger' %}fa-exclamation-triangle
+                    {% elif variant == 'warning' %}fa-triangle-exclamation
+                    {% else %}fa-info-circle{% endif %}"></i>
+                <span class="whitespace-pre-line">{{ message }}</span>
+            </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+{% endwith %}

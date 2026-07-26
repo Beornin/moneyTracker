@@ -4,6 +4,8 @@ import io
 import json
 import shutil
 import subprocess
+import threading
+import time
 import webbrowser
 import pandas as pd
 import requests as http_requests
@@ -17,10 +19,11 @@ from dotenv import load_dotenv
 
 from constants import DASHBOARD_MONTH_SPAN, EXCLUDED_CAT, EXCLUDED_CAT_CORE, EXCLUDED_PAYEE_LABELS_CORE
 from models import db, Account, StatementRecord, Category, Entity, Transaction, Event, Budget, BudgetPlan, BudgetLineItem, create_tables
-from utils.helpers import get_uncategorized_id, try_parse_date, find_or_create_entity, update_entity_patterns, apply_entity_to_transactions, auto_match_transactions_to_entity, rematch_all_entities, get_monthly_summary_direct
+from utils.helpers import get_uncategorized_id, try_parse_date, find_or_create_entity, update_entity_patterns, apply_entity_to_transactions, auto_match_transactions_to_entity, rematch_all_entities, get_monthly_summary_direct, sniff_transaction_columns
 from utils.pdf_parsers import parse_chase_pdf, parse_wellsfargo_pdf, parse_hsa_pdf, parse_fidelity_csv
 from services.dashboard import DashboardService
 from routes.retirement import retirement_bp
+from routes.net_worth import net_worth_bp
 
 load_dotenv()
 
@@ -31,6 +34,7 @@ app.config['SECRET_KEY'] = os.urandom(24)
 
 db.init_app(app)
 app.register_blueprint(retirement_bp)
+app.register_blueprint(net_worth_bp)
 
 
 # --- AI INSIGHTS LOGIC ---
@@ -207,7 +211,8 @@ def upload_file():
                     stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
                     df = pd.read_csv(stream, header=0 if csv_has_header else None)
 
-                    # Map columns by header name if header row present, else fall back to position
+                    # 1. Try matching by header name (fastest, most reliable when present)
+                    matched_by_name = False
                     if csv_has_header:
                         # Normalize headers: lowercase, strip whitespace
                         col_map = {str(c).strip().lower(): c for c in df.columns}
@@ -223,14 +228,20 @@ def upload_file():
                         if date_col and desc_col and amount_col:
                             df = df[[date_col, desc_col, amount_col]].copy()
                             df.columns = ['Date', 'Description', 'Amount']
+                            matched_by_name = True
+
+                    # 2. Fall back to content-based sniffing (looks at the actual values, not
+                    # column position) so banks that reorder columns or omit a header row
+                    # still import correctly.
+                    if not matched_by_name:
+                        sniffed = sniff_transaction_columns(df)
+                        if sniffed is not None:
+                            df = sniffed
                         else:
-                            # Header present but unrecognized columns — fall back to first 3
+                            # Last resort: assume positional Date, Description, Amount
                             df = df.iloc[:, [0, 1, 2]].copy()
                             df.columns = ['Date', 'Description', 'Amount']
-                    else:
-                        # No header: assume positional Date, Description, Amount
-                        df = df.iloc[:, [0, 1, 2]].copy()
-                        df.columns = ['Date', 'Description', 'Amount']
+                            flash(f"Warning: Could not auto-detect columns in {file.filename}; assumed order Date, Description, Amount. Please double-check the imported transactions.", "warning")
 
                     # Use manual dates for CSVs if provided
                     if manual_start and manual_end:
@@ -1583,7 +1594,7 @@ def api_budget_pdf_report():
 @app.route('/edit_accounts')
 def edit_accounts():
     accs = Account.query.order_by(Account.name).all()
-    return render_template('edit_account_balances.html', accounts=accs, account_types=['checking','savings','credit_card','brokerage'])
+    return render_template('edit_account_balances.html', accounts=accs, account_types=['checking','savings','credit_card','brokerage','hsa'])
 
 @app.route('/add_account', methods=['POST'])
 def add_account():
@@ -2043,11 +2054,25 @@ def restore_db():
     return redirect(url_for('index'))
 
 
+@app.route('/shutdown', methods=['POST'])
+def shutdown():
+    """Terminate the server process. Used by the UI's Shutdown button so the
+    packaged desktop exe can be closed cleanly without a task-manager kill."""
+    def _shutdown():
+        time.sleep(0.5)  # let the response flush to the client first
+        os._exit(0)
+    threading.Thread(target=_shutdown, daemon=True).start()
+    return jsonify({'success': True, 'message': 'Server is shutting down.'})
+
+
 if __name__ == '__main__':
     with app.app_context(): create_tables()
-    # Open browser after a short delay to let the server start
-    import threading
-    def open_browser():
-        webbrowser.open('http://127.0.0.1:5001')
-    threading.Timer(1.5, open_browser).start()
+    # debug=True runs this whole module twice — once in the reloader's monitor
+    # process, once in the actual worker process it spawns — so without this
+    # guard the browser gets opened twice. WERKZEUG_RUN_MAIN is only set in the
+    # worker, which is the one process that will actually be serving requests.
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        def open_browser():
+            webbrowser.open('http://127.0.0.1:5001')
+        threading.Timer(1.5, open_browser).start()
     app.run(host='0.0.0.0', port=5001, debug=True)

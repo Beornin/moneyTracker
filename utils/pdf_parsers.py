@@ -165,12 +165,23 @@ def parse_chase_pdf(file_stream):
                         amt_str = amt_match.group(1)
                         desc_raw = remainder[:amt_match.start()].strip()
                         if "Order Number" in desc_raw: continue
+                        # Chase sometimes prints a standalone minus sign between the
+                        # description and the amount for a line-item credit reversal
+                        # (pdfplumber extracts it as e.g. "MERCHANT - 2.00", with the
+                        # "-" landing in desc_raw since it's separated from the digits
+                        # by whitespace). That explicit per-line sign means this specific
+                        # transaction is negative regardless of which section
+                        # (purchases vs. payments/credits) it's listed under, so it
+                        # overrides current_multiplier rather than being discarded.
+                        explicit_negative = desc_raw.endswith('-')
+                        if explicit_negative:
+                            desc_raw = desc_raw[:-1].strip()
                         try:
                             t_month = int(d_str.split('/')[0])
                             year = end_year if t_month <= end_month else end_year - 1
                             dt = datetime.strptime(f"{t_month}/{d_str.split('/')[1]}/{year}", '%m/%d/%Y').date()
                             val = abs(float(amt_str.replace(',', '')))
-                            final_amount = val * current_multiplier
+                            final_amount = -val if explicit_negative else val * current_multiplier
                             transactions.append({'Date': dt, 'Description': desc_raw, 'Amount': final_amount})
                         except Exception: continue
         return transactions, period_start, period_end

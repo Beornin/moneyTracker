@@ -1,29 +1,12 @@
+{%- from 'partials/_macros.html' import back_link -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trend Analysis</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    {% include 'partials/_head_common.html' %}
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <script>tailwind.config = { darkMode: 'class' }</script>
-    <script>
-        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-    </script>
-    <style>
-        .category-list::-webkit-scrollbar { width: 6px; }
-        .category-list::-webkit-scrollbar-track { background: #f1f5f9; }
-        .dark .category-list::-webkit-scrollbar-track { background: #1f2937; }
-        .category-list::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
-        .dark .category-list::-webkit-scrollbar-thumb { background: #4b5563; }
-        #loading-spinner { border: 5px solid #f3f3f3; border-top: 5px solid #3b82f6; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 font-sans leading-normal tracking-normal min-h-screen transition-colors duration-200">
 
@@ -35,9 +18,7 @@
             </h1>
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Select categories, accounts, and options to plot.</p>
             
-            <a href="{{ url_for('index') }}" class="inline-block text-sm font-medium mb-6 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
-                <i class="fa-solid fa-arrow-left mr-2"></i>Back to Dashboard
-            </a>
+            <div class="mb-6">{{ back_link(url_for('index')) }}</div>
 
             <form id="trends-form" class="space-y-4">
                 <div class="mb-6 p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg border border-indigo-100 dark:border-indigo-800">
@@ -116,7 +97,7 @@
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fa-solid fa-landmark w-4 mr-1"></i>Accounts
                     </label>
-                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-32 overflow-y-auto category-list space-y-2">
+                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-32 overflow-y-auto thin-scrollbar category-list space-y-2">
                         {% if accounts %}
                             {% for acc in accounts %}
                             <label class="flex items-center cursor-pointer item-label">
@@ -140,7 +121,7 @@
                     <input type="text" id="cat-search" placeholder="Filter categories..." 
                            class="w-full mb-2 px-3 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm shadow-sm focus:ring-blue-500 focus:border-blue-500">
                     
-                    <div id="category-list" class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-64 overflow-y-auto category-list space-y-1">
+                    <div id="category-list" class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-64 overflow-y-auto thin-scrollbar category-list space-y-1">
                         {% for cat in categories %}
                             <label class="flex items-center cursor-pointer item-label">
                                 <input type="checkbox" name="category_ids" value="{{ cat.id }}" 
@@ -159,7 +140,7 @@
                     <input type="text" id="payee-search" placeholder="Filter payees..." 
                            class="w-full mb-2 px-3 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md text-sm shadow-sm focus:ring-blue-500 focus:border-blue-500">
 
-                    <div id="payee-list" class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-48 overflow-y-auto category-list space-y-2">
+                    <div id="payee-list" class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-48 overflow-y-auto thin-scrollbar category-list space-y-2">
                         {% if payee_labels %}
                             {% for label in payee_labels %}
                             <label class="flex items-center cursor-pointer item-label">
@@ -181,7 +162,7 @@
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fa-solid fa-calendar-check w-4 mr-1"></i>Events (Overlay)
                     </label>
-                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-32 overflow-y-auto category-list space-y-2">
+                    <div class="p-3 border border-gray-300 dark:border-gray-600 rounded-lg h-32 overflow-y-auto thin-scrollbar category-list space-y-2">
                         {% if all_events %}
                             {% for event in all_events %}
                             <label class="flex items-center cursor-pointer">
@@ -243,7 +224,7 @@
 
             <div id="chart-container" class="w-full h-[80vh] min-h-[500px] bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4">
                 <div id="loading-spinner-container" class="h-full w-full flex-col hidden items-center justify-center text-center">
-                    <div id="loading-spinner"></div>
+                    <div id="loading-spinner" class="app-spinner"></div>
                     <p class="mt-4 text-lg font-medium text-gray-700 dark:text-gray-300">Fetching data...</p>
                 </div>
                 <div id="chart-placeholder" class="h-full w-full flex items-center justify-center text-center">

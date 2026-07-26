@@ -1,22 +1,12 @@
+{%- from 'partials/_macros.html' import back_link -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ scenario.name }} — Simulation Results</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>tailwind.config = { darkMode: 'class' }</script>
+    {% include 'partials/_head_common.html' %}
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <script>
-        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark');
-        } else { document.documentElement.classList.remove('dark'); }
-    </script>
-    <style>
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #10b981; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
 <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-[95%]">
@@ -35,18 +25,16 @@
             <button id="run-btn" class="px-5 py-2 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition-colors">
                 <i class="fa-solid fa-play mr-2"></i>Run Monte Carlo
             </button>
-            <a href="{{ url_for('retirement.edit_scenario', scenario_id=scenario.id) }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm">
-                <i class="fa-solid fa-pen-to-square mr-2"></i>Edit
-            </a>
-            <a href="{{ url_for('retirement.index') }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm">
-                <i class="fa-solid fa-arrow-left mr-2"></i>Back
-            </a>
+            {{ back_link(url_for('retirement.edit_scenario', scenario_id=scenario.id), 'Edit', 'fa-pen-to-square') }}
+            {{ back_link(url_for('retirement.index'), 'Back') }}
         </div>
     </div>
 
+    {% include 'partials/_flash.html' %}
+
     <!-- Loading -->
     <div id="loading" class="hidden flex flex-col items-center justify-center py-20">
-        <div class="loader mb-4"></div>
+        <div class="app-spinner app-spinner-emerald mb-4"></div>
         <p class="text-gray-500 dark:text-gray-400 text-lg">Running <span id="loading-count">1,000</span> market simulations...</p>
     </div>
 
@@ -55,22 +43,22 @@
 
         <!-- Success Gauge -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-            <div id="gauge-card" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center col-span-1">
+            <div id="gauge-card" class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center col-span-1">
                 <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Probability of Success</p>
                 <p id="success-rate" class="text-6xl font-black mb-2">—%</p>
                 <p class="text-xs text-gray-400 dark:text-gray-500">Money lasts to age {{ scenario.life_expectancy_age }}</p>
             </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center">
                 <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Median Final Balance</p>
                 <p id="final-balance" class="text-3xl font-bold text-gray-900 dark:text-white">—</p>
                 <p class="text-xs text-gray-400 dark:text-gray-500">At age {{ scenario.life_expectancy_age }}</p>
             </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center">
                 <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Simulations Run</p>
                 <p id="sim-count-display" class="text-3xl font-bold text-gray-900 dark:text-white">—</p>
                 <p class="text-xs text-gray-400 dark:text-gray-500">Monte Carlo paths</p>
             </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700 text-center">
                 <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Years Modeled</p>
                 <p id="years-display" class="text-3xl font-bold text-gray-900 dark:text-white">—</p>
                 <p class="text-xs text-gray-400 dark:text-gray-500" id="age-range">—</p>
@@ -79,11 +67,11 @@
 
         <!-- Charts Row 1: Accumulation + Fan Chart -->
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 border border-gray-200 dark:border-gray-700">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 border border-gray-200 dark:border-gray-700">
                 <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2"><i class="fa-solid fa-arrow-trend-up mr-2 text-blue-500"></i>Accumulation Projection (Deterministic)</h3>
                 <div id="chart-accumulation" style="height: 400px;"></div>
             </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 border border-gray-200 dark:border-gray-700">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 border border-gray-200 dark:border-gray-700">
                 <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2"><i class="fa-solid fa-fan mr-2 text-emerald-500"></i>Portfolio Balance — Monte Carlo Fan Chart</h3>
                 <div id="chart-fan" style="height: 400px;"></div>
             </div>
@@ -91,18 +79,18 @@
 
         <!-- Charts Row 2: Income Breakdown + Tax Rate -->
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 border border-gray-200 dark:border-gray-700">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 border border-gray-200 dark:border-gray-700">
                 <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2"><i class="fa-solid fa-layer-group mr-2 text-amber-500"></i>Annual Income Breakdown (Reference Run)</h3>
                 <div id="chart-income" style="height: 400px;"></div>
             </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 border border-gray-200 dark:border-gray-700">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 border border-gray-200 dark:border-gray-700">
                 <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2"><i class="fa-solid fa-percent mr-2 text-red-500"></i>Effective Tax Rate Trend</h3>
                 <div id="chart-tax" style="height: 400px;"></div>
             </div>
         </div>
 
         <!-- Year-by-Year Tax Detail Table -->
-        <div id="tax-table-section" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
+        <div id="tax-table-section" class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
             <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">
                 <i class="fa-solid fa-table mr-2 text-indigo-500"></i>Year-by-Year Tax Detail (Median Reference Run)
             </h3>
@@ -120,7 +108,7 @@
                             <th class="py-2 px-2">Eff. Rate</th>
                         </tr>
                     </thead>
-                    <tbody id="tax-table-body" class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                    <tbody id="tax-table-body" class="divide-y divide-gray-200 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
                     </tbody>
                 </table>
             </div>
@@ -128,7 +116,7 @@
 
         <!-- 2025 Tax Bracket Reference -->
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700">
                 <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">
                     <i class="fa-solid fa-scale-balanced mr-2 text-blue-500"></i>2025 Federal Ordinary Income Brackets
                 </h3>
@@ -137,7 +125,7 @@
                         <p class="font-semibold text-gray-600 dark:text-gray-400 mb-2">Married Filing Jointly</p>
                         <table class="w-full text-right">
                             <thead><tr class="text-gray-400 dark:text-gray-500 border-b dark:border-gray-700"><th class="text-left py-1">Rate</th><th class="py-1">Up to</th><th class="py-1">Std. Ded.</th></tr></thead>
-                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
                                 <tr><td class="text-left py-1 font-medium text-green-600">10%</td><td class="py-1">$23,850</td><td class="py-1 text-gray-400" rowspan="7">$30,000</td></tr>
                                 <tr><td class="text-left py-1 font-medium text-green-500">12%</td><td class="py-1">$96,950</td></tr>
                                 <tr><td class="text-left py-1 font-medium text-yellow-500">22%</td><td class="py-1">$206,700</td></tr>
@@ -152,7 +140,7 @@
                         <p class="font-semibold text-gray-600 dark:text-gray-400 mb-2">Single</p>
                         <table class="w-full text-right">
                             <thead><tr class="text-gray-400 dark:text-gray-500 border-b dark:border-gray-700"><th class="text-left py-1">Rate</th><th class="py-1">Up to</th><th class="py-1">Std. Ded.</th></tr></thead>
-                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
                                 <tr><td class="text-left py-1 font-medium text-green-600">10%</td><td class="py-1">$11,925</td><td class="py-1 text-gray-400" rowspan="7">$15,000</td></tr>
                                 <tr><td class="text-left py-1 font-medium text-green-500">12%</td><td class="py-1">$48,475</td></tr>
                                 <tr><td class="text-left py-1 font-medium text-yellow-500">22%</td><td class="py-1">$103,350</td></tr>
@@ -166,7 +154,7 @@
                 </div>
                 <p class="text-xs text-gray-400 dark:text-gray-500 mt-3">+$1,600 extra deduction per person age 65+ (MFJ) / +$2,000 (Single)</p>
             </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700">
                 <h3 class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">
                     <i class="fa-solid fa-chart-simple mr-2 text-emerald-500"></i>2025 LTCG / Qualified Dividend Rates &amp; Social Security Taxation
                 </h3>
@@ -175,7 +163,7 @@
                         <p class="font-semibold text-gray-600 dark:text-gray-400 mb-2">LTCG / Qualified Dividends</p>
                         <table class="w-full text-right">
                             <thead><tr class="text-gray-400 dark:text-gray-500 border-b dark:border-gray-700"><th class="text-left py-1">Rate</th><th class="py-1">MFJ up to</th><th class="py-1">Single up to</th></tr></thead>
-                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
                                 <tr><td class="text-left py-1 font-medium text-green-600">0%</td><td class="py-1">$96,700</td><td class="py-1">$48,350</td></tr>
                                 <tr><td class="text-left py-1 font-medium text-yellow-500">15%</td><td class="py-1">$600,050</td><td class="py-1">$533,400</td></tr>
                                 <tr><td class="text-left py-1 font-medium text-red-500">20%</td><td class="py-1">Above</td><td class="py-1">Above</td></tr>
@@ -187,7 +175,7 @@
                         <p class="text-gray-500 dark:text-gray-400 mb-1">Based on <em>combined income</em> = AGI + ½ SS</p>
                         <table class="w-full text-right">
                             <thead><tr class="text-gray-400 dark:text-gray-500 border-b dark:border-gray-700"><th class="text-left py-1">% Taxable</th><th class="py-1">MFJ above</th><th class="py-1">Single above</th></tr></thead>
-                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
                                 <tr><td class="text-left py-1 font-medium text-green-600">0%</td><td class="py-1">—</td><td class="py-1">—</td></tr>
                                 <tr><td class="text-left py-1 font-medium text-yellow-500">50%</td><td class="py-1">$32,000</td><td class="py-1">$25,000</td></tr>
                                 <tr><td class="text-left py-1 font-medium text-red-500">85%</td><td class="py-1">$44,000</td><td class="py-1">$34,000</td></tr>
@@ -362,5 +350,6 @@ function renderResults(data) {
     }
 }
 </script>
+{% include 'partials/_flash_dismiss.html' %}
 </body>
 </html>

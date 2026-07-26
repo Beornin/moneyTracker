@@ -1,28 +1,14 @@
+{%- from 'partials/_macros.html' import back_link, nav_pill, badge -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Budget Dashboard</title>
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-        }
-    </script>
 
+    {% include 'partials/_head_common.html' %}
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 
-    <script>
-        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-    </script>
     <style>
         /* Tooltip Styles - FIXED ALIGNMENT */
         .tooltip-container {
@@ -76,19 +62,6 @@
             opacity: 1;
         }
         
-        /* Loader */
-        .loader {
-            border: 4px solid #f3f3f3; 
-            border-top: 4px solid #3b82f6; 
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
@@ -116,114 +89,105 @@
         </div>
         
         <div class="mb-6 flex items-center text-sm text-gray-500 dark:text-gray-400">
-            <span class="bg-blue-100 text-blue-800 text-xs font-semibold mr-2 px-2.5 py-0.5 rounded dark:bg-blue-200 dark:text-blue-800">
-                SYSTEM DATE
-            </span>
-            <i class="fa-solid fa-calendar-check mr-2"></i>
+            {{ badge('SYSTEM DATE', 'blue') }}
+            <i class="fa-solid fa-calendar-check ml-2 mr-2"></i>
             Data current as of: <span class="font-bold ml-1">{{ summary.data_anchor_date.strftime('%B %d, %Y') }}</span>
         </div>
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <div class="space-y-2 mb-6">
-                    {% for category, message in messages %}
-                        <div class="p-3 text-sm rounded-lg flex items-center
-                            {% if category == 'success' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% elif category == 'danger' %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% else %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200{% endif %}">
-                            <i class="fa-solid {% if category == 'success' %}fa-check-circle{% elif category == 'danger' %}fa-exclamation-triangle{% else %}fa-info-circle{% endif %} mr-3 w-5 h-5"></i>
-                            <span>{{ message|safe }}</span>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% endif %}
-        {% endwith %}
+        {% include 'partials/_flash.html' %}
         
-        <div class="flex flex-wrap items-center justify-end mb-8 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md transition-colors duration-200">
-            <div class="flex flex-wrap gap-2 items-center">
-                <label class="inline-flex items-center cursor-pointer mr-4">
-            <input type="checkbox" id="view-toggle" class="sr-only peer" {% if view_mode == 'weekly' %}checked{% endif %}>
-            <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
-            <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">
-                <i class="fa-solid fa-calendar-week mr-1"></i>Weekly View
-            </span>
-        </label>
-        <label class="inline-flex items-center cursor-pointer mr-4" title="Include the current incomplete period in charts">
-            <input type="checkbox" id="partial-toggle" class="sr-only peer" {% if show_partial %}checked{% endif %}>
-            <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 dark:peer-focus:ring-amber-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-amber-500"></div>
-            <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">
-                <i class="fa-solid fa-hourglass-half mr-1"></i>Show Partial Period
-            </span>
-        </label>
-        {% if data_through %}
-        <span class="mr-4 text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" title="Latest statement end date across checking + credit card accounts">
-            <i class="fa-solid fa-clock mr-1"></i>Data through: {{ data_through.strftime('%b %d, %Y') }}
-        </span>
-        {% endif %}
-                <label class="inline-flex items-center cursor-pointer mr-4">
+        <!-- View settings -->
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md transition-colors duration-200">
+            <div class="flex flex-wrap items-center gap-4">
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="view-toggle" class="sr-only peer" {% if view_mode == 'weekly' %}checked{% endif %}>
+                    <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+                    <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">
+                        <i class="fa-solid fa-calendar-week mr-1"></i>Weekly View
+                    </span>
+                </label>
+                <label class="inline-flex items-center cursor-pointer" title="Include the current incomplete period in charts">
+                    <input type="checkbox" id="partial-toggle" class="sr-only peer" {% if show_partial %}checked{% endif %}>
+                    <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 dark:peer-focus:ring-amber-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-amber-500"></div>
+                    <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">
+                        <i class="fa-solid fa-hourglass-half mr-1"></i>Show Partial Period
+                    </span>
+                </label>
+                {% if data_through %}
+                <span class="text-xs px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" title="Latest statement end date across checking + credit card accounts">
+                    <i class="fa-solid fa-clock mr-1"></i>Data through: {{ data_through.strftime('%b %d, %Y') }}
+                </span>
+                {% endif %}
+                <label class="inline-flex items-center cursor-pointer">
                     <input type="checkbox" id="ai-toggle" class="sr-only peer">
                     <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
                     <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300"><i class="fa-solid fa-robot mr-1"></i>AI Insights</span>
                 </label>
+            </div>
 
-                <button id="theme-toggle" type="button" class="text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-2.5">
-                    <svg id="theme-toggle-dark-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
-                    <svg id="theme-toggle-light-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 100 2h1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
-                </button>
+            <button id="theme-toggle" type="button" class="text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-2.5">
+                <svg id="theme-toggle-dark-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
+                <svg id="theme-toggle-light-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 100 2h1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
+            </button>
+        </div>
 
-                <a href="{{ url_for('trends') }}" 
-                   class="flex items-center px-4 py-2 border border-purple-500 text-purple-700 dark:text-purple-400 font-semibold rounded-md bg-purple-50 dark:bg-purple-900 hover:bg-purple-100 dark:hover:bg-purple-800 transition duration-150">
-                    <i class="fa-solid fa-chart-line mr-2"></i>Trends
-                </a>
-                
-                <a href="{{ url_for('categorize') }}" 
-                   class="flex items-center px-4 py-2 border border-yellow-500 text-yellow-700 dark:text-yellow-400 font-semibold rounded-md bg-yellow-50 dark:bg-yellow-900 hover:bg-yellow-100 dark:hover:bg-yellow-800 transition duration-150">
-                    <i class="fa-solid fa-tags mr-2"></i>Review ({{ summary.uncategorized_count }})
-                </a>
-                <a href="{{ url_for('manage_categories') }}" 
-                   class="flex items-center px-4 py-2 border border-teal-500 text-teal-700 dark:text-teal-400 font-semibold rounded-md bg-teal-50 dark:bg-teal-900 hover:bg-teal-100 dark:hover:bg-teal-800 transition duration-150">
-                    <i class="fa-solid fa-sitemap mr-2"></i>Categories
-                </a>
-                <a href="{{ url_for('edit_transactions', month_offset=month_offset) }}" 
-                   class="flex items-center px-4 py-2 border border-indigo-500 text-indigo-700 dark:text-indigo-400 font-semibold rounded-md bg-indigo-50 dark:bg-indigo-900 hover:bg-indigo-100 dark:hover:bg-indigo-800 transition duration-150">
-                    <i class="fa-solid fa-pen-to-square mr-2"></i>Transactions
-                </a>
-                <a href="{{ url_for('manage_entities') }}" 
-                   class="flex items-center px-4 py-2 border border-cyan-500 text-cyan-700 dark:text-cyan-400 font-semibold rounded-md bg-cyan-50 dark:bg-cyan-900 hover:bg-cyan-100 dark:hover:bg-cyan-800 transition duration-150">
-                    <i class="fa-solid fa-building mr-2"></i>Entities
-                </a>
-                <a href="{{ url_for('budget_page') }}" 
-                   class="flex items-center px-4 py-2 border border-green-500 text-green-700 dark:text-green-400 font-semibold rounded-md bg-green-50 dark:bg-green-900 hover:bg-green-100 dark:hover:bg-green-800 transition duration-150">
-                    <i class="fa-solid fa-wallet mr-2"></i>Budget
-                </a>
-                <a href="{{ url_for('retirement.index') }}" 
-                   class="flex items-center px-4 py-2 border border-emerald-500 text-emerald-700 dark:text-emerald-400 font-semibold rounded-md bg-emerald-50 dark:bg-emerald-900 hover:bg-emerald-100 dark:hover:bg-emerald-800 transition duration-150">
-                    <i class="fa-solid fa-umbrella-beach mr-2"></i>Retirement
-                </a>
-                <a href="{{ url_for('events') }}" class="flex items-center px-4 py-2 text-sm font-medium text-white bg-pink-600 rounded-lg hover:bg-pink-700 transition duration-300 shadow-md">
-                    <i class="fa-solid fa-calendar mr-2"></i>Events
-                </a>
-                <a href="{{ url_for('edit_accounts') }}" class="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition duration-300 shadow-md">
-                    <i class="fa-solid fa-landmark mr-2"></i>Accounts
-                </a>
-            
-                <a href="{{ url_for('statement_history') }}" 
-                   class="flex items-center px-4 py-2 border border-gray-500 text-gray-700 dark:text-gray-400 font-semibold rounded-md bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 transition duration-150">
-                    <i class="fa-solid fa-file-invoice mr-2"></i>History
-                </a>
-                <form method="POST" action="{{ url_for('backup_db') }}" onsubmit="return confirm('Back up the database now?')">
-                    <button type="submit" title="Backup database to D:\Documents\Database Backups"
-                        class="flex items-center px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-400 dark:border-gray-500 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition duration-150">
-                        <i class="fa-solid fa-database mr-1.5"></i><i class="fa-solid fa-floppy-disk"></i>
+        <!-- Navigation, grouped so it wraps by section instead of raggedly -->
+        <div class="flex flex-wrap items-start gap-x-6 gap-y-3 mb-8 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md transition-colors duration-200">
+            <div class="flex flex-wrap gap-2">
+                {{ nav_pill(url_for('categorize'), 'fa-tags', 'Review (%d)'|format(summary.uncategorized_count), 'yellow') }}
+            </div>
+
+            <div class="hidden lg:block w-px self-stretch bg-gray-200 dark:bg-gray-700"></div>
+
+            <div>
+                <div class="text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1.5">Manage</div>
+                <div class="flex flex-wrap gap-2">
+                    {{ nav_pill(url_for('edit_transactions', month_offset=month_offset), 'fa-pen-to-square', 'Transactions', 'indigo') }}
+                    {{ nav_pill(url_for('manage_categories'), 'fa-sitemap', 'Categories', 'teal') }}
+                    {{ nav_pill(url_for('manage_entities'), 'fa-building', 'Entities', 'cyan') }}
+                    {{ nav_pill(url_for('edit_accounts'), 'fa-landmark', 'Accounts', 'blue') }}
+                    {{ nav_pill(url_for('events'), 'fa-calendar', 'Events', 'pink') }}
+                    {{ nav_pill(url_for('statement_history'), 'fa-file-invoice', 'History', 'gray') }}
+                </div>
+            </div>
+
+            <div class="hidden lg:block w-px self-stretch bg-gray-200 dark:bg-gray-700"></div>
+
+            <div>
+                <div class="text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1.5">Plan &amp; Analyze</div>
+                <div class="flex flex-wrap gap-2">
+                    {{ nav_pill(url_for('trends'), 'fa-chart-line', 'Trends', 'purple') }}
+                    {{ nav_pill(url_for('budget_page'), 'fa-wallet', 'Budget', 'green') }}
+                    {{ nav_pill(url_for('retirement.index'), 'fa-umbrella-beach', 'Retirement', 'emerald') }}
+                    {{ nav_pill(url_for('net_worth.index'), 'fa-scale-balanced', 'Net Worth', 'fuchsia') }}
+                </div>
+            </div>
+
+            <div class="hidden lg:block w-px self-stretch bg-gray-200 dark:bg-gray-700"></div>
+
+            <div class="ml-auto">
+                <div class="text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1.5">System</div>
+                <div class="flex flex-wrap gap-2">
+                    <form method="POST" action="{{ url_for('backup_db') }}" onsubmit="return confirm('Back up the database now?')">
+                        <button type="submit" title="Backup database to D:\Documents\Database Backups"
+                            class="flex items-center px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-400 dark:border-gray-500 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition duration-150">
+                            <i class="fa-solid fa-database mr-1.5"></i><i class="fa-solid fa-floppy-disk"></i>
+                        </button>
+                    </form>
+                    <button onclick="openRestoreModal()" title="Restore database from backup"
+                        class="flex items-center px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-400 border border-amber-400 dark:border-amber-600 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900 transition duration-150">
+                        <i class="fa-solid fa-database mr-1.5"></i><i class="fa-solid fa-rotate-left"></i>
                     </button>
-                </form>
-                <button onclick="openRestoreModal()" title="Restore database from backup"
-                    class="flex items-center px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-400 border border-amber-400 dark:border-amber-600 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900 transition duration-150">
-                    <i class="fa-solid fa-database mr-1.5"></i><i class="fa-solid fa-rotate-left"></i>
-                </button>
+                    <button id="shutdown-btn" onclick="shutdownServer()" title="Shut down the server"
+                        class="flex items-center px-3 py-2 text-sm font-medium text-red-700 dark:text-red-400 border border-red-400 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900 transition duration-150">
+                        <i class="fa-solid fa-power-off mr-1.5"></i>Shutdown
+                    </button>
+                </div>
             </div>
         </div>
 
         <div class="mb-8">
-            <button onclick="toggleActions()" class="w-full flex items-center justify-between px-5 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+            <button onclick="toggleActions()" class="w-full flex items-center justify-between px-5 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                 <span class="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
                     <i class="fa-solid fa-sliders mr-2"></i>Upload &amp; Account Actions
                 </span>
@@ -331,7 +295,7 @@
                     </button>
                 </div>
                 <div id="monthly-insights-loading" class="flex items-center space-x-3">
-                    <div class="loader"></div>
+                    <div class="app-spinner app-spinner-sm"></div>
                     <p class="text-lg">Analyzing last month's spending...</p>
                 </div>
                 <div id="monthly-insights-content" class="text-gray-700 dark:text-gray-300 min-h-[100px]"></div>
@@ -349,7 +313,7 @@
                     </button>
                 </div>
                 <div id="yearly-insights-loading" class="flex items-center space-x-3">
-                    <div class="loader"></div>
+                    <div class="app-spinner app-spinner-sm"></div>
                     <p class="text-lg">Analyzing your year-to-date spending...</p>
                 </div>
                 <div id="yearly-insights-content" class="text-gray-700 dark:text-gray-300 min-h-[100px]"></div>
@@ -378,7 +342,7 @@
         </div>
 
         <div class="w-full mb-8">
-           <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-200 dark:border-blue-900 h-[600px] relative">
+           <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -398,9 +362,7 @@
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
             
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[600px] relative">
-          
-                <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-orange-200 dark:border-orange-900 h-[500px] relative">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-orange-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -413,8 +375,7 @@
                 </div>
                 <div id="chart-dining-patterns" class="w-full h-full"></div>
             </div>
-            </div>
-            
+
 
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
@@ -448,7 +409,7 @@
             </div>
             
 
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[600px] relative">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
                  <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -464,7 +425,7 @@
         </div>
 
         <div class="w-full mb-8">
-             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-200 dark:border-teal-900 h-[600px] relative">
+             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -483,7 +444,7 @@
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
 
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-indigo-200 dark:border-indigo-900 h-[700px] relative">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[700px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-indigo-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -500,7 +461,7 @@
                 <div id="chart-savings-rate" class="w-full h-full"></div>
             </div>
 
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-purple-200 dark:border-purple-900 h-[700px] relative">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[700px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-circle-info text-gray-400 hover:text-purple-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -517,7 +478,7 @@
         
 
         <div class="w-full mb-8">
-             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-teal-300 dark:border-teal-800 h-[600px] relative">
+             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-heart-pulse text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -531,7 +492,7 @@
         </div>
 
         <div class="w-full mb-8">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-green-300 dark:border-green-800 h-[600px] relative">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-chart-line text-gray-400 hover:text-green-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -545,7 +506,7 @@
         </div>
 
         <div class="w-full mb-8">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-blue-300 dark:border-blue-800 h-[400px] relative">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[400px] relative">
                 <div class="absolute top-4 left-4 z-10 tooltip-container">
                     <i class="fa-solid fa-chart-line text-gray-400 hover:text-blue-500 cursor-pointer text-lg"></i>
                     <span class="tooltip-text">
@@ -557,6 +518,20 @@
                 <div id="chart-passive-coverage" class="w-full h-full"></div>
             </div>
         </div>
+
+        <!-- New Flow / Composition Charts -->
+        <div class="w-full mb-8">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-teal-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Category Composition</strong> — relative size of each spending category over the visible range.
+                    </span>
+                </div>
+                <div id="chart-category-composition" class="w-full h-full"></div>
+            </div>
+        </div>
+
 
         <script>
             
@@ -596,6 +571,9 @@
                 const plotBrokerageIncome   = {{ chart_brokerage_income|safe if chart_brokerage_income else 'null' }};
                 const plotPassiveCoverage   = {{ chart_passive_coverage|safe if chart_passive_coverage else 'null' }};
 
+                // New charts
+                const plotCategoryComposition     = {{ chart_category_composition|safe if chart_category_composition else 'null' }};
+
                 renderChart(plotFullCashflow,      'chart-full-cashflow');
                 renderChart(plotWealthBuilder,     'chart-wealth-builder');
                 renderChart(plotTopVendors,        'chart-top-vendors');
@@ -608,6 +586,9 @@
                 renderChart(plotDiningPatterns,    'chart-dining-patterns');
                 renderChart(plotBrokerageIncome,   'chart-brokerage-income');
                 renderChart(plotPassiveCoverage,   'chart-passive-coverage');
+
+                // New charts
+                renderChart(plotCategoryComposition,     'chart-category-composition');
             }
 
             var themeToggleBtn = document.getElementById('theme-toggle');
@@ -956,11 +937,32 @@ function confirmRestore() {
     return confirm(`Restore from:\n${label}\n\nThis will OVERWRITE all current data. Continue?`);
 }
 
+async function shutdownServer() {
+    if (!confirm("Shut down the server? You'll need to relaunch MoneyTracker to use it again.")) return;
+    const btn = document.getElementById('shutdown-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Shutting down...';
+    try {
+        await fetch('{{ url_for("shutdown") }}', { method: 'POST' });
+    } catch (e) {
+        // Expected: the server closes the connection as it exits.
+    }
+    document.body.innerHTML = `
+        <div class="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
+            <div class="text-center p-8">
+                <i class="fa-solid fa-power-off text-4xl text-red-500 mb-4"></i>
+                <p class="text-lg font-semibold text-gray-700 dark:text-gray-300">Server has shut down.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">You can close this tab now.</p>
+            </div>
+        </div>`;
+}
+
 document.getElementById('restore-select')?.addEventListener('change', updateRestoreSize);
 document.getElementById('restore-modal').addEventListener('click', function(e) {
     if (e.target === this) closeRestoreModal();
 });
 </script>
 
+{% include 'partials/_flash_dismiss.html' %}
 </body>
 </html>

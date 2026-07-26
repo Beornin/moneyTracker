@@ -1,0 +1,27 @@
+{# Shared components. Import with:
+   {% from 'partials/_macros.html' import back_link, nav_pill, badge %}
+#}
+
+{% macro back_link(url, label='Dashboard', icon='fa-arrow-left') -%}
+<a href="{{ url }}" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
+    <i class="fa-solid {{ icon }}"></i>{{ label }}
+</a>
+{%- endmacro %}
+
+{% macro nav_pill(url, icon, label, color='indigo') -%}
+<a href="{{ url }}" class="flex items-center px-4 py-2 border border-{{ color }}-500 text-{{ color }}-700 dark:text-{{ color }}-400 font-semibold rounded-lg bg-{{ color }}-50 dark:bg-{{ color }}-900 hover:bg-{{ color }}-100 dark:hover:bg-{{ color }}-800 transition-colors">
+    <i class="fa-solid {{ icon }} mr-2"></i>{{ label }}
+</a>
+{%- endmacro %}
+
+{% macro badge(text, color='gray', icon=none) -%}
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-{{ color }}-100 text-{{ color }}-800 dark:bg-{{ color }}-900 dark:text-{{ color }}-200">{% if icon %}<i class="fa-solid {{ icon }} mr-1.5"></i>{% endif %}{{ text }}</span>
+{%- endmacro %}
+
+{% macro icon_action(url, icon, color='gray', title='', confirm_msg='') -%}
+<form method="POST" action="{{ url }}" class="inline" {% if confirm_msg %}onsubmit="return confirm('{{ confirm_msg }}')"{% endif %}>
+    <button type="submit" title="{{ title }}" class="p-2 rounded-lg text-{{ color }}-600 dark:text-{{ color }}-400 hover:text-{{ color }}-800 dark:hover:text-{{ color }}-300 hover:bg-{{ color }}-50 dark:hover:bg-{{ color }}-900/30 transition-colors">
+        <i class="fa-solid {{ icon }}"></i>
+    </button>
+</form>
+{%- endmacro %}

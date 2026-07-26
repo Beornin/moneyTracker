@@ -297,7 +297,7 @@ def snapshots():
         return redirect(url_for('retirement.snapshots'))
 
     all_snapshots = PortfolioSnapshot.query.order_by(PortfolioSnapshot.date.desc()).all()
-    return render_template('retirement/snapshots.html', snapshots=all_snapshots)
+    return render_template('retirement/snapshots.html', snapshots=all_snapshots, today=date.today().isoformat())
 
 
 @retirement_bp.route('/snapshot/<int:snap_id>/delete', methods=['POST'])

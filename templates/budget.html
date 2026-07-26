@@ -1,28 +1,14 @@
+{%- from 'partials/_macros.html' import back_link -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Budget Planner</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = { darkMode: 'class' }
-    </script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <script>
-        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-    </script>
+    {% include 'partials/_head_common.html' %}
     <style>
-        .modal-bg { display:none; position:fixed; z-index:50; inset:0; background:rgba(0,0,0,0.5); }
+        .modal-bg { display:none; position:fixed; z-index:50; inset:0; background:rgba(0,0,0,0.6); }
         .modal-bg.show { display:flex; align-items:center; justify-content:center; }
-        .status-green { color: #16a34a; }
-        .status-yellow { color: #ca8a04; }
-        .status-red { color: #dc2626; }
-        .status-neutral { color: #6b7280; }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
@@ -34,9 +20,7 @@
         <p class="text-gray-500 dark:text-gray-400 mb-6">Define expected monthly income &amp; expenses. The active budget drives dashboard "core" charts and outlier detection.</p>
 
         <div class="flex justify-between items-center mb-6">
-            <a href="{{ url_for('index', month_offset=0) }}" class="flex items-center text-sm font-medium px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition duration-150">
-                <i class="fa-solid fa-arrow-left mr-2"></i>Back to Dashboard
-            </a>
+            {{ back_link(url_for('index', month_offset=0)) }}
         </div>
 
         <!-- Plan Selector -->
@@ -53,13 +37,13 @@
                         {% endfor %}
                     </select>
                 </div>
-                <button onclick="showCreatePlanModal()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md">
+                <button onclick="showCreatePlanModal()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">
                     <i class="fa-solid fa-plus mr-1"></i>New Plan
                 </button>
-                <button onclick="activatePlan()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md">
+                <button onclick="activatePlan()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">
                     <i class="fa-solid fa-star mr-1"></i>Set Active
                 </button>
-                <button onclick="deletePlan()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md">
+                <button onclick="deletePlan()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">
                     <i class="fa-solid fa-trash mr-1"></i>Delete
                 </button>
             </div>
@@ -68,16 +52,16 @@
         <!-- Bulk Actions -->
         <div id="bulk-actions" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md mb-6 border border-gray-200 dark:border-gray-700 {% if not active_plan %}hidden{% endif %}">
             <div class="flex flex-wrap gap-2">
-                <button onclick="showAddItemModal()" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-md">
+                <button onclick="showAddItemModal()" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">
                     <i class="fa-solid fa-plus mr-1"></i>Add Line Item
                 </button>
-                <button onclick="showPopulateModal()" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md">
+                <button onclick="showPopulateModal()" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">
                     <i class="fa-solid fa-magic mr-1"></i>Populate from Averages
                 </button>
-                <button onclick="showImportModal()" class="px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded-md">
+                <button onclick="showImportModal()" class="px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">
                     <i class="fa-solid fa-file-import mr-1"></i>Import CSV
                 </button>
-                <button onclick="showPdfModal()" class="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-md">
+                <button onclick="showPdfModal()" class="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">
                     <i class="fa-solid fa-file-pdf mr-1"></i>Download PDF Report
                 </button>
             </div>
@@ -91,9 +75,9 @@
                         <i class="fa-solid fa-chart-bar mr-2 text-indigo-500"></i>Budget vs Actual
                     </h2>
                     <div class="flex items-center gap-2">
-                        <button onclick="changeBvaMonth(-1)" class="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600"><i class="fa-solid fa-chevron-left"></i></button>
+                        <button onclick="changeBvaMonth(-1)" class="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"><i class="fa-solid fa-chevron-left"></i></button>
                         <span id="bva-month-label" class="text-sm font-medium text-gray-700 dark:text-gray-300 min-w-[120px] text-center"></span>
-                        <button onclick="changeBvaMonth(1)" class="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600"><i class="fa-solid fa-chevron-right"></i></button>
+                        <button onclick="changeBvaMonth(1)" class="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"><i class="fa-solid fa-chevron-right"></i></button>
                     </div>
                 </div>
                 
@@ -183,19 +167,19 @@
 
     <!-- Create Plan Modal -->
     <div id="createPlanModal" class="modal-bg">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 border border-gray-200 dark:border-gray-700">
             <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Create Budget Plan</h3>
             <input type="text" id="new-plan-name" placeholder="e.g. 2025 Family Budget" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2 mb-4">
             <div class="flex gap-2 justify-end">
-                <button onclick="document.getElementById('createPlanModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md">Cancel</button>
-                <button onclick="createPlan()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md">Create</button>
+                <button onclick="document.getElementById('createPlanModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md transition-colors">Cancel</button>
+                <button onclick="createPlan()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">Create</button>
             </div>
         </div>
     </div>
 
     <!-- Add Item Modal -->
     <div id="addItemModal" class="modal-bg">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-lg w-full mx-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 border border-gray-200 dark:border-gray-700">
             <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4" id="item-modal-title">Add Line Item</h3>
             <input type="hidden" id="edit-item-id" value="">
             <div class="space-y-4">
@@ -246,28 +230,28 @@
                 </div>
             </div>
             <div class="flex gap-2 justify-end mt-6">
-                <button onclick="document.getElementById('addItemModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md">Cancel</button>
-                <button onclick="saveItem()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md">Save</button>
+                <button onclick="document.getElementById('addItemModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md transition-colors">Cancel</button>
+                <button onclick="saveItem()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">Save</button>
             </div>
         </div>
     </div>
 
     <!-- Import CSV Modal -->
     <div id="importModal" class="modal-bg">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-lg w-full mx-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 border border-gray-200 dark:border-gray-700">
             <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Import from CSV</h3>
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Paste CSV with columns: <code>label, type (category|entity), amount, notes</code></p>
             <textarea id="csv-input" rows="10" placeholder="Groceries, category, 800&#10;JEA, entity, 250&#10;Salary, category, 5000, primary income" class="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2 text-sm font-mono"></textarea>
             <div class="flex gap-2 justify-end mt-4">
-                <button onclick="document.getElementById('importModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md">Cancel</button>
-                <button onclick="importCsv()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md">Import</button>
+                <button onclick="document.getElementById('importModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md transition-colors">Cancel</button>
+                <button onclick="importCsv()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">Import</button>
             </div>
         </div>
     </div>
 
     <!-- PDF Report Modal -->
     <div id="pdfModal" class="modal-bg">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 border border-gray-200 dark:border-gray-700">
             <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">
                 <i class="fa-solid fa-file-pdf mr-2 text-purple-500"></i>Download PDF Budget Report
             </h3>
@@ -305,8 +289,8 @@
                 </div>
             </div>
             <div class="flex gap-2 justify-end mt-6">
-                <button onclick="document.getElementById('pdfModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md text-sm">Cancel</button>
-                <button onclick="downloadPdfReport()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium">
+                <button onclick="document.getElementById('pdfModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md text-sm transition-colors">Cancel</button>
+                <button onclick="downloadPdfReport()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium shadow-sm transition-colors">
                     <i class="fa-solid fa-download mr-1"></i>Generate Report
                 </button>
             </div>
@@ -315,7 +299,7 @@
 
     <!-- Populate Modal -->
     <div id="populateModal" class="modal-bg">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 border border-gray-200 dark:border-gray-700">
             <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Populate from Averages</h3>
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Auto-generate line items from your actual spending averages. Existing items won't be duplicated.</p>
             <div class="mb-4">
@@ -327,8 +311,8 @@
                 </select>
             </div>
             <div class="flex gap-2 justify-end">
-                <button onclick="document.getElementById('populateModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md">Cancel</button>
-                <button onclick="populateFromAverages()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md">Populate</button>
+                <button onclick="document.getElementById('populateModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md transition-colors">Cancel</button>
+                <button onclick="populateFromAverages()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">Populate</button>
             </div>
         </div>
     </div>

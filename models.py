@@ -211,6 +211,47 @@ class PortfolioSnapshot(db.Model, TimestampMixin):
     )
 
 
+# ── Net Worth Tracker Models ───────────────────────────────────────────
+# Fully standalone: no FK to Account/Transaction. Balances are manual,
+# dated snapshots the user enters whenever they check in.
+
+class NetWorthAccount(db.Model, TimestampMixin):
+    """A single asset or debt line item (e.g. 'Fidelity Roth IRA', 'Mortgage')."""
+    id = db.Column(db.Integer, primary_key=True)
+    owner = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    item_type = db.Column(db.String(10), nullable=False)  # 'asset' | 'debt'
+    category = db.Column(db.String(50), nullable=False)
+    institution = db.Column(db.String(100), nullable=True)
+    account_number = db.Column(db.String(100), nullable=True)
+    online_access_url = db.Column(db.String(500), nullable=True)
+    liquidity_horizon = db.Column(db.String(20), nullable=True)  # 'now'|'now_mid'|'mid_long'|'long'
+    notes = db.Column(db.Text, nullable=True)
+    include_in_net_worth = db.Column(db.Boolean, default=True, nullable=False)
+    is_archived = db.Column(db.Boolean, default=False, nullable=False, index=True)
+
+    snapshots = db.relationship('NetWorthSnapshot', backref='account', lazy=True,
+                                 cascade='all, delete-orphan', order_by='NetWorthSnapshot.date')
+
+    __table_args__ = (
+        db.Index('idx_nwa_owner', 'owner'),
+        db.Index('idx_nwa_type_archived', 'item_type', 'is_archived'),
+    )
+
+
+class NetWorthSnapshot(db.Model, TimestampMixin):
+    """Point-in-time balance for a NetWorthAccount. Stored as a positive magnitude;
+    the parent account's item_type determines whether it counts as an asset or debt."""
+    id = db.Column(db.Integer, primary_key=True)
+    net_worth_account_id = db.Column(db.Integer, db.ForeignKey('net_worth_account.id'), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    balance = db.Column(db.Numeric(12, 2), nullable=False)
+
+    __table_args__ = (
+        db.Index('idx_nws_account_date', 'net_worth_account_id', 'date'),
+    )
+
+
 def create_tables():
     db.create_all()
 
