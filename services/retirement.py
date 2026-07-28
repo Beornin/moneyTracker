@@ -4,9 +4,9 @@ and Monte Carlo simulation for portfolio longevity.
 """
 import copy
 import numpy as np
-from sqlalchemy import func, extract
+from sqlalchemy.orm import joinedload
 
-from models import db, Transaction, Category
+from models import Transaction, Category
 
 # ── 2025 Federal Tax Brackets ──────────────────────────────────────────
 
@@ -526,36 +526,52 @@ def get_expense_averages_by_category(months=12):
     Query the last N months of transactions and return average monthly
     spend per expense category. Used for expense pre-fill.
     Returns list of dicts: [{'category_id': int, 'category_name': str, 'monthly_avg': float}]
+
+    Spend is netted per-entity across the whole window before being summed into
+    category totals, so a refund (or a sinking-fund drawdown, e.g. money pulled back
+    out of a personal account after being contributed) offsets its own entity's prior
+    outflow instead of being double-counted as separate spend. An entity that nets
+    positive over the window contributes zero to its category rather than negative
+    expense — it never offsets a different entity's real purchase in the same category.
     """
     from datetime import date, timedelta
     cutoff = date.today() - timedelta(days=months * 30)
 
-    rows = db.session.query(
-        Category.id,
-        Category.name,
-        func.sum(Transaction.amount),
-        func.count(func.distinct(extract('month', Transaction.date) + extract('year', Transaction.date) * 100))
-    ).join(Transaction.category).filter(
+    txs = Transaction.query.options(joinedload(Transaction.category)).join(Transaction.category).filter(
         Transaction.date >= cutoff,
         Transaction.is_deleted == False,
-        Transaction.amount < 0,
         Category.name != EXCLUDED_CAT,
         ~Category.name.in_(SAVINGS_CATS),
         Category.type == 'Expense',
-    ).group_by(Category.id, Category.name).all()
+    ).all()
+
+    entity_net = {}      # (category_id, entity_id) -> net amount over the whole window
+    cat_names = {}        # category_id -> name
+    active_months = {}    # category_id -> set of (year, month) with a real charge
+
+    for t in txs:
+        key = (t.category_id, t.entity_id)
+        entity_net[key] = entity_net.get(key, 0.0) + float(t.amount)
+        cat_names[t.category_id] = t.category.name
+        if t.amount < 0:
+            active_months.setdefault(t.category_id, set()).add((t.date.year, t.date.month))
+
+    cat_totals = {}
+    for (cat_id, entity_id), net in entity_net.items():
+        if net < 0:
+            cat_totals[cat_id] = cat_totals.get(cat_id, 0.0) + net
 
     results = []
-    for cat_id, cat_name, total_spent, month_count in rows:
-        if month_count and month_count > 0:
-            monthly_avg = abs(float(total_spent)) / month_count
-        else:
-            monthly_avg = 0
-        if monthly_avg > 0:
-            results.append({
-                'category_id': cat_id,
-                'category_name': cat_name,
-                'monthly_avg': round(monthly_avg, 2),
-            })
+    for cat_id, total_spent in cat_totals.items():
+        month_count = len(active_months.get(cat_id, ()))
+        if month_count > 0:
+            monthly_avg = abs(total_spent) / month_count
+            if monthly_avg > 0:
+                results.append({
+                    'category_id': cat_id,
+                    'category_name': cat_names[cat_id],
+                    'monthly_avg': round(monthly_avg, 2),
+                })
 
     results.sort(key=lambda x: x['monthly_avg'], reverse=True)
     return results
