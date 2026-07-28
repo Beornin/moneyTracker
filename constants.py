@@ -14,6 +14,12 @@ EXCLUDED_CAT_CORE = []
 # so do not use them for core calculations
 EXCLUDED_PAYEE_LABELS_CORE = []
 
+# Entity name for the joint Fidelity brokerage link (checking <-> brokerage transfers).
+# Withdrawals FROM this entity are flagged red on cash-flow charts; withdrawals from any
+# other brokerage-linked entity (e.g. an individual retirement account) are not, since
+# pulling from the joint account is the one that matters for household cash flow.
+JOINT_FIDELITY_ENTITY_NAME = 'Joint Fidelity'
+
 # --- NET WORTH TRACKER ---
 
 NET_WORTH_ASSET_CATEGORIES = [

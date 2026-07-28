@@ -6,7 +6,7 @@ from sqlalchemy.orm import joinedload
 import plotly.graph_objects as go
 from plotly.io import to_json
 
-from constants import EXCLUDED_CAT, DASHBOARD_MONTH_SPAN
+from constants import EXCLUDED_CAT, DASHBOARD_MONTH_SPAN, JOINT_FIDELITY_ENTITY_NAME
 from models import (
     db, Account, StatementRecord, Category, Transaction, Event, Entity,
     BudgetPlan, BudgetLineItem,
@@ -611,14 +611,14 @@ class DashboardService:
         for cat in sorted(list(all_cats), reverse=True):
             y_vals = [cat_data.get(m, {}).get(cat, 0) for m in period_strs]
             fig.add_trace(go.Bar(name=cat, x=period_strs, y=y_vals))
-        fig.update_layout(title='Core Expenses by Category (Breakdown)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, legend=dict(traceorder='reversed'), **self.base_layout)
+        fig.update_layout(title='Full Expenses by Category (Breakdown)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, legend=dict(traceorder='reversed'), **self.base_layout)
         return to_json(fig, pretty=True)
 
     def _chart_wealth_builder(self, periods, period_strs, grouped_txs, shapes, anns):
         """Building Wealth — cumulative line treats internal flows (transfers, investment in/out) as wealth-neutral."""
         # Categories representing money moving between the user's own accounts (not real wealth change).
         INTERNAL_FLOW_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
-        regular_inc, investment_withdrawals, c_exp = [], [], []
+        regular_inc, joint_fidelity_withdrawals, other_investment_withdrawals, c_exp = [], [], [], []
         ytd_cumulative = 0.0
         ytd_net, alltime_net = [], []
         # Cumulative includes ALL positives (internal inflows fund real spending so let them offset).
@@ -629,9 +629,15 @@ class DashboardService:
         )
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
-            # Display bars unchanged: Investment broken out separately, Income excludes it.
-            invest_withdrawal_val = float(sum(t.amount for t in p_txs if t.amount > 0 and t.category.name == 'Investment'))
-            entity_nets_display = self._net_by_entity(p_txs, exclude_cats=[EXCLUDED_CAT, 'Investment'])
+            # Display bars exclude ALL internal flows, matching the cumulative line below —
+            # this chart is "out WITHOUT investments", so VUL/transfers must not read as expense.
+            # Investment withdrawals are surfaced separately as their own traces instead.
+            # Joint Fidelity pulls are split out and flagged red; withdrawals from any other
+            # brokerage-linked entity (e.g. an individual retirement account) are not.
+            invest_pull_txs = [t for t in p_txs if t.amount > 0 and t.category.name == 'Investment']
+            joint_withdrawal_val = float(sum(t.amount for t in invest_pull_txs if t.entity.name == JOINT_FIDELITY_ENTITY_NAME))
+            other_withdrawal_val = float(sum(t.amount for t in invest_pull_txs if t.entity.name != JOINT_FIDELITY_ENTITY_NAME))
+            entity_nets_display = self._net_by_entity(p_txs, exclude_cats=list({EXCLUDED_CAT} | INTERNAL_FLOW_CATS))
             regular_inc_val = float(sum(i['amount'] for i in entity_nets_display.values() if i['amount'] > 0))
             exp_val = float(abs(sum(i['amount'] for i in entity_nets_display.values() if i['amount'] < 0)))
             # Cumulative calculation (asymmetric exclusion).
@@ -642,13 +648,15 @@ class DashboardService:
             current_surplus = cum_inc - cum_exp
             ytd_cumulative += current_surplus
             regular_inc.append(regular_inc_val)
-            investment_withdrawals.append(invest_withdrawal_val)
+            joint_fidelity_withdrawals.append(joint_withdrawal_val)
+            other_investment_withdrawals.append(other_withdrawal_val)
             c_exp.append(exp_val)
             ytd_net.append(ytd_cumulative)
             alltime_net.append(prior_offset + ytd_cumulative)
 
         fig = go.Figure()
-        fig.add_trace(go.Bar(name='Investment Withdrawals', x=period_strs, y=investment_withdrawals, marker_color='#ef4444'))
+        fig.add_trace(go.Bar(name='Joint Fidelity Withdrawals', x=period_strs, y=joint_fidelity_withdrawals, marker_color='#ef4444'))
+        fig.add_trace(go.Bar(name='Other Investment Withdrawals', x=period_strs, y=other_investment_withdrawals, marker_color='#94a3b8'))
         fig.add_trace(go.Bar(name='Income', x=period_strs, y=regular_inc, marker_color='#10b981'))
         fig.add_trace(go.Bar(name='Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
         fig.add_trace(go.Scatter(name='YTD Cumulative Surplus', x=period_strs, y=ytd_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
