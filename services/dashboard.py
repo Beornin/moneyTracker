@@ -368,6 +368,74 @@ class DashboardService:
             'items': item_results
         }
 
+    def get_needs_wants_waterfall(self, year, month):
+        """Actual-spend waterfall for a single month: Income, then each budgeted
+        Need/Want line item (plus any leftover category spend no line item claimed),
+        ending in Remaining. Categories representing wealth-building (INTERNAL_FLOW_CATS)
+        are consumption-neutral and excluded entirely, never shown as a step -- matching
+        how the rest of the app treats them.
+
+        Returns {'income': float, 'steps': [{'label', 'category_name', 'priority', 'amount'}],
+        'remaining': float}. 'priority' is 'need' | 'want' | 'unclassified', resolved from
+        the line item's own category, or its entity's category for entity-linked items.
+        """
+        INTERNAL_FLOW_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
+        month_start = date(year, month, 1)
+        month_end = date(year, month, calendar.monthrange(year, month)[1])
+
+        p_txs = [t for t in self.core_transactions
+                 if month_start <= t.date <= month_end
+                 and t.category.name != EXCLUDED_CAT
+                 and t.category.name not in INTERNAL_FLOW_CATS]
+
+        income_nets = self._net_by_entity([t for t in p_txs if t.category.type == 'Income'])
+        income = float(sum(v['amount'] for v in income_nets.values() if v['amount'] > 0))
+
+        expense_txs = [t for t in p_txs if t.category.type != 'Income']
+
+        def priority_of(cat):
+            return cat.priority if cat and cat.priority in ('need', 'want') else 'unclassified'
+
+        steps = []
+        matched_ids = set()
+
+        monthly_items = [li for li in (self.budget_line_items or [])
+                          if li.item_type == 'expense'
+                          and (getattr(li, 'frequency', 'monthly') or 'monthly') == 'monthly']
+
+        for li in monthly_items:
+            li_txs = [t for t in expense_txs if self._budget_line_item_match(li, t, matched_ids)]
+            if not li_txs:
+                continue
+            nets = self._net_by_entity(li_txs)
+            amount = abs(sum(v['amount'] for v in nets.values() if v['amount'] < 0))
+            if amount <= 0:
+                continue
+            matched_ids.update(t.id for t in li_txs)
+            cat = li.category or (li.entity.category if li.entity else None)
+            steps.append({'label': li.label, 'category_name': cat.name if cat else None,
+                          'priority': priority_of(cat), 'amount': amount})
+
+        leftover_by_cat = {}
+        for t in expense_txs:
+            if t.id not in matched_ids:
+                leftover_by_cat.setdefault(t.category_id, []).append(t)
+
+        for cat_id, txs in leftover_by_cat.items():
+            nets = self._net_by_entity(txs)
+            amount = abs(sum(v['amount'] for v in nets.values() if v['amount'] < 0))
+            if amount <= 0:
+                continue
+            cat = txs[0].category
+            steps.append({'label': cat.name, 'category_name': cat.name,
+                          'priority': priority_of(cat), 'amount': amount})
+
+        order = {'need': 0, 'want': 1, 'unclassified': 2}
+        steps.sort(key=lambda s: (order[s['priority']], -s['amount']))
+
+        remaining = income - sum(s['amount'] for s in steps)
+        return {'income': income, 'steps': steps, 'remaining': float(remaining)}
+
     def _chart_dining_patterns(self, start_date, end_date):
         dow_totals = {i: 0.0 for i in range(7)}
         dow_counts = {i: 0 for i in range(7)}

@@ -986,9 +986,15 @@ def budget_page():
     active_plan = BudgetPlan.query.filter_by(is_active=True).first()
     cats = Category.query.order_by(Category.name).all()
     entities = Entity.query.order_by(Entity.name).all()
+    internal_flow_cats = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
+    taggable_categories = [
+        {'id': c.id, 'name': c.name, 'priority': c.priority}
+        for c in cats if c.type == 'Expense' and c.name not in internal_flow_cats
+    ]
     return render_template('budget.html', plans=plans, active_plan=active_plan,
                            categories=cats,
-                           entities=entities)
+                           entities=entities,
+                           taggable_categories=taggable_categories)
 
 @app.route('/api/budget_plan', methods=['POST'])
 def api_create_budget_plan():
@@ -1036,6 +1042,7 @@ def api_get_budget_plan_items(plan_id):
     items = BudgetLineItem.query.filter_by(budget_id=plan_id).order_by(BudgetLineItem.item_type, BudgetLineItem.label).all()
     result = []
     for i in items:
+        cat = i.category or (i.entity.category if i.entity else None)
         result.append({
             'id': i.id,
             'label': i.label,
@@ -1046,7 +1053,8 @@ def api_get_budget_plan_items(plan_id):
             'entity_name': i.entity.name if i.entity else None,
             'expected_amount': float(i.expected_amount),
             'frequency': getattr(i, 'frequency', 'monthly'),
-            'notes': i.notes
+            'notes': i.notes,
+            'priority': cat.priority if cat and cat.priority in ('need', 'want') else None
         })
     return jsonify({'items': result})
 
@@ -1370,6 +1378,32 @@ def api_budget_vs_actual():
         'items': items_result,
         'unbudgeted': unbudgeted
     })
+
+@app.route('/api/budget_waterfall')
+def api_budget_waterfall():
+    year = int(request.args.get('year', date.today().year))
+    month = int(request.args.get('month', date.today().month))
+    service = DashboardService(view_mode='monthly', year=year)
+    data = service.get_needs_wants_waterfall(year, month)
+    return jsonify({'success': True, 'month_name': calendar.month_name[month], 'year': year, **data})
+
+@app.route('/api/category_priority', methods=['POST'])
+def api_category_priority():
+    payload = request.get_json(silent=True) or {}
+    updated = 0
+    for key, val in payload.items():
+        if val not in ('need', 'want'):
+            continue
+        try:
+            cat_id = int(key)
+        except (TypeError, ValueError):
+            continue
+        cat = db.session.get(Category, cat_id)
+        if cat:
+            cat.priority = val
+            updated += 1
+    db.session.commit()
+    return jsonify({'success': True, 'updated': updated})
 
 @app.route('/api/budget/pdf_report')
 def api_budget_pdf_report():

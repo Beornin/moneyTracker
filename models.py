@@ -35,6 +35,7 @@ class Category(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False, unique=True)
     type = db.Column(db.String(20), nullable=False)
+    priority = db.Column(db.String(10), nullable=True)  # 'need' | 'want' | None (unclassified)
     transactions = db.relationship('Transaction', backref='category', lazy=True)
     entities = db.relationship('Entity', backref='category', lazy=True)
 
