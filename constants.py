@@ -30,6 +30,15 @@ INTERNAL_FLOW_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', '
 # live off our paychecks. Excluded from the zero-based budget waterfall.
 INVESTMENT_INCOME_CATS = {'Empower IRA', 'Investment Income'}
 
+# Reserve "buckets" we draw on when normal income doesn't cover the month:
+# Joint Fidelity is the middle-bucket/emergency fund, Ben Fidelity a personal
+# sinking fund, Tucker Fidelity a kid's savings account. Money pulled OUT of these
+# into checking is shown on the budget waterfall as available funds (distinct from
+# income), because it funds spending that does appear in the chart -- without it the
+# month looks worse than it was. The Way2Save overdraft buffer is deliberately not
+# listed; it's a last-resort cushion, not a funding source.
+BUCKET_ENTITY_NAMES = {'Joint Fidelity', 'Ben Fidelity', 'Tucker Fidelity'}
+
 # --- NET WORTH TRACKER ---
 
 NET_WORTH_ASSET_CATEGORIES = [

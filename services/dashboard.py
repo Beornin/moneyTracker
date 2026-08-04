@@ -9,6 +9,7 @@ from plotly.io import to_json
 from constants import (
     EXCLUDED_CAT, DASHBOARD_MONTH_SPAN, JOINT_FIDELITY_ENTITY_NAME,
     INTERNAL_FLOW_CATS as SHARED_INTERNAL_FLOW_CATS, INVESTMENT_INCOME_CATS,
+    BUCKET_ENTITY_NAMES,
 )
 from models import (
     db, Account, StatementRecord, Category, Transaction, Event, Entity,
@@ -382,17 +383,40 @@ class DashboardService:
         too -- this view answers "can we live off our normal income", so a one-off rollover
         landing in checking must not read as a huge earning month.
 
-        Returns {'income': float, 'steps': [{'label', 'category_name', 'priority', 'amount'}],
-        'remaining': float}. 'priority' is 'need' | 'want' | 'unclassified', resolved from
-        the line item's own category, or its entity's category for entity-linked items.
+        Money drawn out of a reserve bucket (BUCKET_ENTITY_NAMES) into checking is reported
+        separately as 'draws' -- available funds, not income -- so a month funded partly
+        from the emergency fund doesn't read as a pure shortfall.
+
+        Returns {'income': float, 'draws': [{'label','source','amount'}], 'total_drawn': float,
+        'steps': [{'label','category_name','priority','amount'}], 'remaining': float}, where
+        remaining = income + total_drawn - sum(steps). 'priority' is 'need' | 'want' |
+        'unclassified', resolved from the line item's own category, or its entity's category
+        for entity-linked items.
         """
         excluded_cats = {EXCLUDED_CAT} | SHARED_INTERNAL_FLOW_CATS | INVESTMENT_INCOME_CATS
         month_start = date(year, month, 1)
         month_end = date(year, month, calendar.monthrange(year, month)[1])
 
-        p_txs = [t for t in self.core_transactions
-                 if month_start <= t.date <= month_end
-                 and t.category.name not in excluded_cats]
+        month_txs = [t for t in self.core_transactions if month_start <= t.date <= month_end]
+
+        # Reserve buckets are netted per month from the RAW month's transactions, before the
+        # category exclusions above -- Joint Fidelity sits in an excluded internal-flow
+        # category, so its draws would otherwise be invisible. A bucket that nets positive
+        # sent money INTO checking and funded spending that does appear below, so it's
+        # surfaced as available funds. A bucket that nets negative was contributed to, and
+        # keeps its existing treatment (a normal expense step, or excluded for Joint Fidelity)
+        # -- so a bucket is never counted on both sides in the same month.
+        bucket_nets = {}
+        for t in month_txs:
+            if t.entity.name in BUCKET_ENTITY_NAMES:
+                bucket_nets[t.entity.name] = bucket_nets.get(t.entity.name, 0.0) + float(t.amount)
+        drawn_buckets = {n for n, v in bucket_nets.items() if v > 0}
+        draws = [{'label': f'From {n}', 'source': n, 'amount': v}
+                 for n, v in sorted(bucket_nets.items(), key=lambda kv: -kv[1]) if v > 0]
+
+        p_txs = [t for t in month_txs
+                 if t.category.name not in excluded_cats
+                 and t.entity.name not in drawn_buckets]
 
         income_nets = self._net_by_entity([t for t in p_txs if t.category.type == 'Income'])
         income = float(sum(v['amount'] for v in income_nets.values() if v['amount'] > 0))
@@ -439,8 +463,15 @@ class DashboardService:
         order = {'need': 0, 'want': 1, 'unclassified': 2}
         steps.sort(key=lambda s: (order[s['priority']], -s['amount']))
 
-        remaining = income - sum(s['amount'] for s in steps)
-        return {'income': income, 'steps': steps, 'remaining': float(remaining)}
+        total_drawn = sum(d['amount'] for d in draws)
+        remaining = income + total_drawn - sum(s['amount'] for s in steps)
+        return {
+            'income': income,
+            'draws': draws,
+            'total_drawn': float(total_drawn),
+            'steps': steps,
+            'remaining': float(remaining),
+        }
 
     def _chart_dining_patterns(self, start_date, end_date):
         dow_totals = {i: 0.0 for i in range(7)}

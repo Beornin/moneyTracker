@@ -86,6 +86,7 @@
                 </div>
                 <div class="flex flex-wrap items-center gap-x-5 gap-y-2 mb-3 text-xs text-gray-600 dark:text-gray-400">
                     <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm" style="background:#10b981"></span>Income</span>
+                    <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm" style="background:#06b6d4"></span>Drawn from reserves</span>
                     <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm" style="background:#6366f1"></span>Need</span>
                     <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm" style="background:#f59e0b"></span>Want</span>
                     <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm" style="background:#9ca3af"></span>Untagged</span>
@@ -335,19 +336,39 @@
             // renders in one default red -- losing the Need/Want distinction entirely.
             // A bar spans [base, base + y], so stepping `base` down the running total
             // reproduces the waterfall shape while keeping full per-bar color control.
-            const labels = ['Income', ...d.steps.map(s => s.label), 'Remaining'];
-            const colors = ['#10b981', ...d.steps.map(s => priorityColor[s.priority] || priorityColor.unclassified), remainingColor];
-            const text = [`$${fmt(d.income)}`, ...d.steps.map(s => `-$${fmt(s.amount)}`), `$${fmt(d.remaining)}`];
+            const draws = d.draws || [];
+            const labels = ['Income', ...draws.map(x => x.label), ...d.steps.map(s => s.label), 'Remaining'];
+            const colors = [
+                '#10b981',
+                ...draws.map(() => '#06b6d4'),
+                ...d.steps.map(s => priorityColor[s.priority] || priorityColor.unclassified),
+                remainingColor,
+            ];
+            const text = [
+                `$${fmt(d.income)}`,
+                ...draws.map(x => `+$${fmt(x.amount)}`),
+                ...d.steps.map(s => `-$${fmt(s.amount)}`),
+                `$${fmt(d.remaining)}`,
+            ];
             const hover = [
-                `<b>Income</b><br>$${fmt(d.income)}<extra></extra>`,
+                `<b>Income</b><br>$${fmt(d.income)}<br>normal income only<extra></extra>`,
+                ...draws.map(x => `<b>${x.label}</b><br>+$${fmt(x.amount)}<br>drawn from reserves<extra></extra>`),
                 ...d.steps.map(s => `<b>${s.label}</b><br>-$${fmt(s.amount)}<br>${s.priority}<extra></extra>`),
                 `<b>Remaining</b><br>$${fmt(d.remaining)}<extra></extra>`,
             ];
 
+            // Draws are additive (money arriving), steps subtractive -- both step the
+            // running total, so `base` walks up for draws and down for expenses.
             const bases = [0];
             const heights = [d.income];
             const levels = [d.income];          // running total after each bar, for connectors
             let cum = d.income;
+            draws.forEach(x => {
+                bases.push(cum);
+                heights.push(x.amount);
+                cum += x.amount;
+                levels.push(cum);
+            });
             d.steps.forEach(s => {
                 cum -= s.amount;
                 bases.push(cum);
