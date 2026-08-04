@@ -723,7 +723,7 @@ class DashboardService:
         """Building Wealth — cumulative line treats internal flows (transfers, investment in/out) as wealth-neutral."""
         # Categories representing money moving between the user's own accounts (not real wealth change).
         INTERNAL_FLOW_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
-        regular_inc, joint_fidelity_withdrawals, other_investment_withdrawals, c_exp = [], [], [], []
+        regular_inc, ira_distributions, joint_fidelity_withdrawals, other_investment_withdrawals, c_exp = [], [], [], [], []
         ytd_cumulative = 0.0
         ytd_net, alltime_net = [], []
         # Cumulative includes ALL positives (internal inflows fund real spending so let them offset).
@@ -743,8 +743,16 @@ class DashboardService:
             joint_withdrawal_val = float(sum(t.amount for t in invest_pull_txs if t.entity.name == JOINT_FIDELITY_ENTITY_NAME))
             other_withdrawal_val = float(sum(t.amount for t in invest_pull_txs if t.entity.name != JOINT_FIDELITY_ENTITY_NAME))
             entity_nets_display = self._net_by_entity(p_txs, exclude_cats=list({EXCLUDED_CAT} | INTERNAL_FLOW_CATS))
-            regular_inc_val = float(sum(i['amount'] for i in entity_nets_display.values() if i['amount'] > 0))
+            inc_all_val = float(sum(i['amount'] for i in entity_nets_display.values() if i['amount'] > 0))
             exp_val = float(abs(sum(i['amount'] for i in entity_nets_display.values() if i['amount'] < 0)))
+            # Inherited-IRA / brokerage distributions land in checking like income, but they're
+            # an outside pot being drawn down, not earnings. Split into their own bar so they
+            # can't be mistaken for salary -- the same reason Joint Fidelity pulls are broken
+            # out above. Subtracted from the income bar rather than re-netted, so the totals
+            # and the cumulative line below are bit-for-bit unchanged.
+            ira_val = float(sum(i['amount'] for i in entity_nets_display.values()
+                                if i['amount'] > 0 and i['category_name'] in INVESTMENT_INCOME_CATS))
+            regular_inc_val = inc_all_val - ira_val
             # Cumulative calculation (asymmetric exclusion).
             cum_inc_nets = self._net_by_entity(p_txs, exclude_cats=[EXCLUDED_CAT])
             cum_exp_nets = self._net_by_entity(p_txs, exclude_cats=list({EXCLUDED_CAT} | INTERNAL_FLOW_CATS))
@@ -753,17 +761,22 @@ class DashboardService:
             current_surplus = cum_inc - cum_exp
             ytd_cumulative += current_surplus
             regular_inc.append(regular_inc_val)
+            ira_distributions.append(ira_val)
             joint_fidelity_withdrawals.append(joint_withdrawal_val)
             other_investment_withdrawals.append(other_withdrawal_val)
             c_exp.append(exp_val)
             ytd_net.append(ytd_cumulative)
             alltime_net.append(prior_offset + ytd_cumulative)
 
+        # IRA shares the income bar's slot (offsetgroup) and stacks on top of it (base), so the
+        # grouped layout keeps the same four slots it had before this trace was added -- a fifth
+        # slot would shift every bar off its month tick.
         fig = go.Figure()
-        fig.add_trace(go.Bar(name='Joint Fidelity Withdrawals', x=period_strs, y=joint_fidelity_withdrawals, marker_color='#ef4444'))
-        fig.add_trace(go.Bar(name='Other Investment Withdrawals', x=period_strs, y=other_investment_withdrawals, marker_color='#94a3b8'))
-        fig.add_trace(go.Bar(name='Income', x=period_strs, y=regular_inc, marker_color='#10b981'))
-        fig.add_trace(go.Bar(name='Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
+        fig.add_trace(go.Bar(name='Joint Fidelity Withdrawals', x=period_strs, y=joint_fidelity_withdrawals, marker_color='#ef4444', offsetgroup='jointwd'))
+        fig.add_trace(go.Bar(name='Other Investment Withdrawals', x=period_strs, y=other_investment_withdrawals, marker_color='#94a3b8', offsetgroup='otherwd'))
+        fig.add_trace(go.Bar(name='Income', x=period_strs, y=regular_inc, marker_color='#10b981', offsetgroup='inflow'))
+        fig.add_trace(go.Bar(name='IRA Distributions', x=period_strs, y=ira_distributions, base=regular_inc, marker_color='#06b6d4', offsetgroup='inflow'))
+        fig.add_trace(go.Bar(name='Expenses', x=period_strs, y=c_exp, marker_color='#6366f1', offsetgroup='outflow'))
         fig.add_trace(go.Scatter(name='YTD Cumulative Surplus', x=period_strs, y=ytd_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
         fig.add_trace(go.Scatter(name='Cumulative Surplus (incl. Prior Years)', x=period_strs, y=alltime_net, mode='lines+markers', line=dict(color='#a855f7', width=3, dash='dot'), visible='legendonly'))
         fig.update_layout(
@@ -828,7 +841,7 @@ class DashboardService:
         return to_json(fig, pretty=True)
 
     def _chart_full_cashflow(self, periods, period_strs, grouped_txs, shapes, anns):
-        c_inc, c_exp = [], []
+        c_inc, c_ira, c_exp = [], [], []
         ytd_cumulative = 0.0
         ytd_net, alltime_net = [], []
         prior_offset = self._prior_years_surplus(
@@ -838,18 +851,29 @@ class DashboardService:
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
             entity_nets = self._net_by_entity(p_txs)
-            inc_val = float(sum(i['amount'] for i in entity_nets.values() if i['amount'] > 0))
+            inc_all_val = float(sum(i['amount'] for i in entity_nets.values() if i['amount'] > 0))
             exp_val = float(abs(sum(i['amount'] for i in entity_nets.values() if i['amount'] < 0)))
-            current_surplus = inc_val - exp_val
+            # This chart is deliberately the raw "everything counts" view, so the cumulative
+            # below still includes IRA distributions. They're only peeled off the income BAR
+            # so a one-off inherited-IRA draw isn't visually indistinguishable from salary.
+            ira_val = float(sum(i['amount'] for i in entity_nets.values()
+                                if i['amount'] > 0 and i['category_name'] in INVESTMENT_INCOME_CATS))
+            current_surplus = inc_all_val - exp_val
             ytd_cumulative += current_surplus
-            c_inc.append(inc_val)
+            c_inc.append(inc_all_val - ira_val)
+            c_ira.append(ira_val)
             c_exp.append(exp_val)
             ytd_net.append(ytd_cumulative)
             alltime_net.append(prior_offset + ytd_cumulative)
 
+        # IRA shares the income bar's slot via offsetgroup and sits on top of it via `base`,
+        # so the grouped layout keeps exactly the same number of slots (and therefore the same
+        # bar positions) as before this trace existed -- an extra slot would shift every bar
+        # off its month tick. Total bar height still reads as the month's full inflow.
         fig = go.Figure()
-        fig.add_trace(go.Bar(name='Full Income', x=period_strs, y=c_inc, marker_color='#10b981'))
-        fig.add_trace(go.Bar(name='Full Expenses', x=period_strs, y=c_exp, marker_color='#6366f1'))
+        fig.add_trace(go.Bar(name='Full Income', x=period_strs, y=c_inc, marker_color='#10b981', offsetgroup='inflow'))
+        fig.add_trace(go.Bar(name='IRA Distributions', x=period_strs, y=c_ira, base=c_inc, marker_color='#06b6d4', offsetgroup='inflow'))
+        fig.add_trace(go.Bar(name='Full Expenses', x=period_strs, y=c_exp, marker_color='#6366f1', offsetgroup='outflow'))
         fig.add_trace(go.Scatter(name='YTD Cumulative Surplus', x=period_strs, y=ytd_net, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
         fig.add_trace(go.Scatter(name='Cumulative Surplus (incl. Prior Years)', x=period_strs, y=alltime_net, mode='lines+markers', line=dict(color='#a855f7', width=3, dash='dot'), visible='legendonly'))
         fig.update_layout(title='Full Income vs Full Expense', barmode='group', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, showlegend=True, legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), margin=self.margin_legend, shapes=shapes, annotations=anns, **self.base_layout)
