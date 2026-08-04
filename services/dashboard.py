@@ -426,8 +426,33 @@ class DashboardService:
         def priority_of(cat):
             return cat.priority if cat and cat.priority in ('need', 'want') else 'unclassified'
 
+        def resolved_priority(entity, cat):
+            """Entity override wins over its category. NULL entity priority = inherit."""
+            if entity is not None and entity.priority in ('need', 'want'):
+                return entity.priority
+            return priority_of(cat)
+
         steps = []
         matched_ids = set()
+
+        # An entity with an explicit override is pulled out as its own step BEFORE any
+        # line-item or category grouping. Otherwise a category-linked line item (e.g. the
+        # "Personal Care" bucket) would swallow it and re-apply the category's priority,
+        # silently ignoring the override.
+        override_txs = {}
+        for t in expense_txs:
+            if t.entity is not None and t.entity.priority in ('need', 'want'):
+                override_txs.setdefault(t.entity_id, []).append(t)
+
+        for eid, txs in override_txs.items():
+            matched_ids.update(t.id for t in txs)
+            nets = self._net_by_entity(txs)
+            amount = abs(sum(v['amount'] for v in nets.values() if v['amount'] < 0))
+            if amount <= 0:
+                continue
+            ent = txs[0].entity
+            steps.append({'label': ent.name, 'category_name': ent.category.name if ent.category else None,
+                          'priority': ent.priority, 'amount': amount})
 
         monthly_items = [li for li in (self.budget_line_items or [])
                           if li.item_type == 'expense'
@@ -444,7 +469,7 @@ class DashboardService:
             matched_ids.update(t.id for t in li_txs)
             cat = li.category or (li.entity.category if li.entity else None)
             steps.append({'label': li.label, 'category_name': cat.name if cat else None,
-                          'priority': priority_of(cat), 'amount': amount})
+                          'priority': resolved_priority(li.entity, cat), 'amount': amount})
 
         leftover_by_cat = {}
         for t in expense_txs:

@@ -46,6 +46,8 @@ class Entity(db.Model, TimestampMixin):
     category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=False)
     match_patterns = db.Column(db.JSON, default=list)
     match_type = db.Column(db.String(20), default='any', nullable=False)
+    # Overrides Category.priority for need/want. NULL = inherit from the category.
+    priority = db.Column(db.String(10), nullable=True)
     is_auto_created = db.Column(db.Boolean, default=False, nullable=False, index=True)
     notes = db.Column(db.Text, nullable=True)
     transactions = db.relationship('Transaction', backref='entity', lazy=True)

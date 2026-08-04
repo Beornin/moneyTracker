@@ -107,13 +107,35 @@ Renaming either silently disables internal-flow handling across five charts with
 
 ## 6. Need vs Want
 
-`Category.priority` — `'need' | 'want' | NULL`. Tagged **per category**, once, via the
-"Categorize Categories" modal on `/budget`. Every line item and transaction inherits from its
-category (entity-linked items resolve via `entity.category`). Deliberately *not* per-entity —
-the user will not hand-tag every merchant inside Groceries.
+Two levels, resolved **entity first, then category**:
 
-Added by a manual `ALTER TABLE category ADD COLUMN priority VARCHAR(10)` —
+| Field | Role |
+|---|---|
+| `Category.priority` | The default. Tag once, everything in the category inherits it. |
+| `Entity.priority` | **Exception override.** `NULL` = inherit from category. |
+
+Both are `'need' | 'want' | NULL`, set via the **Needs vs Wants** modal on `/budget`
+(Categories tab / Payees tab). The Payees tab lists only entities with spend in the last 365
+days (~284 of 503), sorted overrides-first then by spend, since only large or genuinely
+misfiled payees are worth an exception.
+
+In `get_needs_wants_waterfall`, a transaction whose entity carries an override is **pulled out
+as its own step before any line-item or category grouping**. Otherwise a category-linked line
+item (e.g. the `Personal Care` bucket) would swallow it and re-apply the category's priority,
+silently ignoring the override. Worked example: `Diapers` sits in `Personal Care` (want);
+overriding the entity to `need` moved exactly $223.00 from wants to needs in Jul 2026, left
+`Personal Care` at want, and left `remaining` unchanged.
+
+Both columns were added by manual `ALTER TABLE` (`category` and `entity`) —
 `db.create_all()` only creates missing tables, it does not alter existing ones.
+
+### What this does *not* fix
+
+**Mixed-basket merchants.** All 274 Amazon purchases are categorised `Shopping` even though
+the basket is really groceries + household + shopping. Tagging the *entity* `Amazon Mktpl` is
+one blunt choice for ~$6,700/yr of mixed spend. The only real fix is recategorising individual
+Amazon transactions (`/categorize` or `/update_transaction`) — a data-entry problem, not a
+schema one. Same applies to `Venmo`, `Zelle`, and `Target`.
 
 ---
 

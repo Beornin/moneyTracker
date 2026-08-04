@@ -993,10 +993,38 @@ def budget_page():
         {'id': c.id, 'name': c.name, 'priority': c.priority}
         for c in cats if c.type == 'Expense' and c.name not in internal_flow_cats
     ]
+
+    # Entities offered for a need/want override: those with real spend in the last 12 months
+    # (503 entities exist; only ~290 have recent activity and listing them all is unusable),
+    # plus any that already carry an override so it can be seen and cleared.
+    cutoff = date.today() - timedelta(days=365)
+    spend_rows = db.session.query(
+        Entity.id, Entity.name, Entity.priority, Category.name, Category.priority,
+        func.sum(Transaction.amount)
+    ).join(Transaction, Transaction.entity_id == Entity.id)\
+     .join(Category, Category.id == Entity.category_id)\
+     .join(Account, Account.id == Transaction.account_id)\
+     .filter(Transaction.is_deleted == False,
+             Transaction.amount < 0,
+             Transaction.date >= cutoff,
+             Category.type == 'Expense',
+             ~Category.name.in_(internal_flow_cats),
+             ~Account.account_type.in_(['hsa', 'brokerage']))\
+     .group_by(Entity.id, Entity.name, Entity.priority, Category.name, Category.priority)\
+     .all()
+
+    taggable_entities = sorted(
+        ({'id': eid, 'name': name, 'priority': prio,
+          'category': cat_name, 'category_priority': cat_prio,
+          'spend': round(abs(float(total)), 2)}
+         for eid, name, prio, cat_name, cat_prio, total in spend_rows),
+        key=lambda e: -e['spend'])
+
     return render_template('budget.html', plans=plans, active_plan=active_plan,
                            categories=cats,
                            entities=entities,
-                           taggable_categories=taggable_categories)
+                           taggable_categories=taggable_categories,
+                           taggable_entities=taggable_entities)
 
 @app.route('/api/budget_plan', methods=['POST'])
 def api_create_budget_plan():
@@ -1404,6 +1432,25 @@ def api_category_priority():
         if cat:
             cat.priority = val
             updated += 1
+    db.session.commit()
+    return jsonify({'success': True, 'updated': updated})
+
+@app.route('/api/entity_priority', methods=['POST'])
+def api_entity_priority():
+    """Set/clear per-entity need/want overrides. A value of 'inherit' (or anything other
+    than need/want) clears the override so the entity falls back to its category."""
+    payload = request.get_json(silent=True) or {}
+    updated = 0
+    for key, val in payload.items():
+        try:
+            ent_id = int(key)
+        except (TypeError, ValueError):
+            continue
+        ent = db.session.get(Entity, ent_id)
+        if not ent:
+            continue
+        ent.priority = val if val in ('need', 'want') else None
+        updated += 1
     db.session.commit()
     return jsonify({'success': True, 'updated': updated})
 

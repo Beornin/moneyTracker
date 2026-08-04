@@ -285,18 +285,29 @@
     <!-- Categorize Categories Modal -->
     <div id="categorizeModal" class="modal-bg">
         <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 border border-gray-200 dark:border-gray-700">
-            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-1">Categorize Categories</h3>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Tag each spending category once as a Need or a Want. Every line item and transaction in that category inherits the tag — no need to tag individual entities.</p>
-            <div id="categorize-list" class="space-y-2 max-h-96 overflow-y-auto pr-1"></div>
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-1">Needs vs Wants</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">Tag a <b>category</b> once and everything in it inherits the tag. Use the <b>Payees</b> tab only for exceptions — a payee override beats its category.</p>
+            <div class="flex gap-1 mb-3 border-b border-gray-200 dark:border-gray-700">
+                <button id="tab-btn-cats" onclick="switchTagTab('cats')" class="px-3 py-2 text-sm font-medium border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400">Categories</button>
+                <button id="tab-btn-ents" onclick="switchTagTab('ents')" class="px-3 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400">Payees (exceptions)</button>
+            </div>
+            <div id="tab-cats">
+                <div id="categorize-list" class="space-y-2 max-h-96 overflow-y-auto pr-1"></div>
+            </div>
+            <div id="tab-ents" class="hidden">
+                <input id="entity-search" oninput="renderEntityList()" placeholder="Search payees…" class="w-full mb-2 rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white p-2 text-sm">
+                <div id="entity-list" class="space-y-1 max-h-96 overflow-y-auto pr-1"></div>
+            </div>
             <div class="flex gap-2 justify-end mt-6">
                 <button onclick="document.getElementById('categorizeModal').classList.remove('show')" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md transition-colors">Close</button>
-                <button onclick="saveCategoryPriorities()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">Save</button>
+                <button onclick="saveTagging()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors">Save</button>
             </div>
         </div>
     </div>
 
     <script>
         const TAGGABLE_CATEGORIES = {{ taggable_categories|tojson }};
+        const TAGGABLE_ENTITIES = {{ taggable_entities|tojson }};
         let currentPlanId = {{ active_plan.id if active_plan else 'null' }};
 
         function fmt(n) { return Number(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -415,6 +426,77 @@
             Plotly.newPlot('wf-chart', [trace], layout, { responsive: true, displayModeBar: false });
         }
 
+        function switchTagTab(which) {
+            const isCats = which === 'cats';
+            document.getElementById('tab-cats').classList.toggle('hidden', !isCats);
+            document.getElementById('tab-ents').classList.toggle('hidden', isCats);
+            const on = 'border-indigo-600 text-indigo-600 dark:text-indigo-400';
+            const off = 'border-transparent text-gray-500 dark:text-gray-400';
+            document.getElementById('tab-btn-cats').className = `px-3 py-2 text-sm font-medium border-b-2 ${isCats?on:off}`;
+            document.getElementById('tab-btn-ents').className = `px-3 py-2 text-sm font-medium border-b-2 ${isCats?off:on}`;
+            if (!isCats) renderEntityList();
+        }
+
+        function renderEntityList() {
+            const q = (document.getElementById('entity-search').value || '').toLowerCase();
+            // Overridden payees float to the top so existing exceptions are always visible,
+            // then by spend — the list is long and only the big ones are worth overriding.
+            const rows = TAGGABLE_ENTITIES
+                .filter(e => !q || e.name.toLowerCase().includes(q) || (e.category||'').toLowerCase().includes(q))
+                .sort((a,b) => (b.priority?1:0)-(a.priority?1:0) || b.spend-a.spend)
+                .slice(0, 150);
+            document.getElementById('entity-list').innerHTML = rows.map(e => {
+                const inherited = e.category_priority || 'untagged';
+                const eff = e.priority || inherited;
+                const badge = e.priority
+                    ? `<span class="text-xs px-1.5 py-0.5 rounded ${e.priority==='need'?'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200':'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'}">override</span>`
+                    : `<span class="text-xs text-gray-400">via ${e.category} (${inherited})</span>`;
+                const btn = (val,label,activeCls) => `<button type="button" onclick="setEntPriority(${e.id},'${val}',this)"
+                    class="ent-btn px-2 py-1 text-xs rounded-md border ${e.priority===val?activeCls:'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300'}">${label}</button>`;
+                return `<div class="flex items-center justify-between gap-2 py-1.5 border-b border-gray-100 dark:border-gray-700">
+                    <div class="min-w-0">
+                        <div class="text-sm text-gray-800 dark:text-gray-200 truncate">${e.name}</div>
+                        <div class="flex items-center gap-2">${badge}<span class="text-xs text-gray-400">$${fmt(e.spend)}/yr</span></div>
+                    </div>
+                    <div class="flex gap-1 shrink-0" data-ent-id="${e.id}">
+                        ${btn('need','Need','bg-indigo-600 text-white border-indigo-600')}
+                        ${btn('want','Want','bg-amber-500 text-white border-amber-500')}
+                        ${btn('inherit','Auto','bg-gray-500 text-white border-gray-500')}
+                    </div>
+                </div>`;
+            }).join('') || '<div class="text-sm text-gray-400 py-3">No payees match.</div>';
+        }
+
+        function setEntPriority(entId, priority, btn) {
+            const e = TAGGABLE_ENTITIES.find(x => x.id === entId);
+            if (e) e.priority = (priority === 'inherit') ? null : priority;
+            const group = btn.parentElement;
+            group.querySelectorAll('.ent-btn').forEach(b => {
+                b.className = 'ent-btn px-2 py-1 text-xs rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300';
+            });
+            const cls = priority==='need' ? 'bg-indigo-600 text-white border-indigo-600'
+                      : priority==='want' ? 'bg-amber-500 text-white border-amber-500'
+                      : 'bg-gray-500 text-white border-gray-500';
+            btn.className = `ent-btn px-2 py-1 text-xs rounded-md border ${cls}`;
+        }
+
+        async function saveTagging() {
+            const catPayload = {};
+            TAGGABLE_CATEGORIES.forEach(c => { if (c.priority==='need'||c.priority==='want') catPayload[c.id]=c.priority; });
+            const entPayload = {};
+            TAGGABLE_ENTITIES.forEach(e => { entPayload[e.id] = e.priority || 'inherit'; });
+            const [rc, re] = await Promise.all([
+                fetch('/api/category_priority', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(catPayload)}),
+                fetch('/api/entity_priority',  {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(entPayload)}),
+            ]);
+            const [dc, de] = [await rc.json(), await re.json()];
+            if (dc.success && de.success) {
+                document.getElementById('categorizeModal').classList.remove('show');
+                loadWaterfall();
+                if (currentPlanId) loadItems();
+            } else { alert('Could not save.'); }
+        }
+
         function showCategorizeModal() {
             const list = document.getElementById('categorize-list');
             list.innerHTML = TAGGABLE_CATEGORIES.map(c => `
@@ -425,6 +507,7 @@
                         <button type="button" onclick="setCatPriority(${c.id}, 'want', this)" class="cat-priority-btn px-2 py-1 text-xs rounded-md border ${c.priority === 'want' ? 'bg-amber-500 text-white border-amber-500' : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300'}">Want</button>
                     </div>
                 </div>`).join('');
+            switchTagTab('cats');
             document.getElementById('categorizeModal').classList.add('show');
         }
 
@@ -438,18 +521,6 @@
             });
             btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-600', 'dark:text-gray-300');
             btn.classList.add('text-white', priority === 'need' ? 'bg-indigo-600' : 'bg-amber-500', priority === 'need' ? 'border-indigo-600' : 'border-amber-500');
-        }
-
-        async function saveCategoryPriorities() {
-            const payload = {};
-            TAGGABLE_CATEGORIES.forEach(c => { if (c.priority === 'need' || c.priority === 'want') payload[c.id] = c.priority; });
-            const r = await fetch('/api/category_priority', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-            const d = await r.json();
-            if (d.success) {
-                document.getElementById('categorizeModal').classList.remove('show');
-                loadWaterfall();
-                if (currentPlanId) loadItems();
-            } else { alert('Could not save.'); }
         }
 
         function showCreatePlanModal() { document.getElementById('createPlanModal').classList.add('show'); }
