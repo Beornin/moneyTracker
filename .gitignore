@@ -17,3 +17,7 @@ server.err
 .pytest_cache/
 .vscode/
 .idea/
+
+# Real household financial detail (dollar figures, bank/vendor names, account structure).
+# Kept locally for Claude Code / the finance-db-validator agent to read -- never pushed.
+/FINANCIAL_MODEL.md

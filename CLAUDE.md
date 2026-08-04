@@ -5,11 +5,15 @@ Single-user Flask + Postgres personal finance app, packaged as a Windows exe. It
 
 ## Read this first
 
-**[FINANCIAL_MODEL.md](FINANCIAL_MODEL.md)** documents how this household's money actually
-moves and why the code makes the choices it does. Read it before touching
-`services/dashboard.py`, `services/retirement.py`, or the budget page. Most of the exclusion
-logic looks arbitrary without it, and several "obvious fixes" have already been tried and
-rejected for reasons recorded there.
+**`FINANCIAL_MODEL.md`** (repo root) documents how this household's money actually moves and
+why the code makes the choices it does. Read it before touching `services/dashboard.py`,
+`services/retirement.py`, or the budget page. Most of the exclusion logic looks arbitrary
+without it, and several "obvious fixes" have already been tried and rejected for reasons
+recorded there.
+
+**It's gitignored on purpose** — it has real dollar figures and household financial structure,
+and this repo is public. The file lives locally on this machine; if it's missing (e.g. a fresh
+clone), ask the user for it rather than reconstructing the model from guesses.
 
 ## Layout
 
