@@ -146,17 +146,22 @@ Added by a manual `ALTER TABLE category ADD COLUMN priority VARCHAR(10)` —
 
   | Group | Rows | Verdict |
   |---|---|---|
-  | **`Facebk` / `Reimbursements`** | **57 pos + 57 neg = 114** | **Duplicates.** Perfectly balanced per (date, amount); entity nets to exactly **$0.00**. Real defect. |
+  | **`Facebk` / `Reimbursements`** | **57 pos + 57 neg = 114** | ✅ **RESOLVED 2026-08-03 — soft-deleted.** Not a parser bug: these were **fraudulent charges that Chase refunded in full**, so both the charge and its refund legitimately appeared on the statement. Confined to 2025-03-25 … 2025-04-14 on the Chase card, netting exactly $0.00. Row-level backup at `facebk_rows_backup.json` in the session scratchpad; reverse with `UPDATE transaction SET is_deleted=false WHERE entity_id=1124`. |
   | `Amazon Mktpl` (22), `Target` (5), `Instacart` (3), `Diapers`, `Rupa Labs`, ~10 singles | ~64 | **Genuine refunds.** Zero same-day opposite rows — correctly positive, leave alone. |
   | `Payment Thank You` (CC payments) | 20 | Correctly positive; `Ignored Credit Card Payment` is excluded from every calculation anyway. |
   | `Frownies`, `Blake's Fun Bounce` | 2 | Ambiguous — same date/amount opposite pair, but *different* description text, so plausibly a real same-day refund rather than a duplicate. |
 
-  **Impact is small and mostly self-cancelling**: the Facebk pairs are same-date, so per-period
-  entity netting already cancels them everywhere netting is used. They only inflate *gross*
-  figures — income and expense each by $384.72 — plus 114 phantom rows in the ledger.
+  Removing the Facebk rows changed **2 of 56** captured chart series — only a `Facebk $0.00`
+  entry dropping out of *Top Income Sources 2025*. Per-period entity netting had already been
+  cancelling them everywhere netting is used; they only ever inflated *gross* figures.
 
   ⚠️ Do **not** bulk-flip every artifact row's sign. Roughly half are legitimate refunds; the
   artifact correlates with Chase's credits section, not with being wrong.
+
+  **Soft delete leaves the FK in place.** `/api/delete_orphaned_entities` originally treated an
+  entity with only soft-deleted rows as orphaned and tried to delete it, raising an
+  IntegrityError that rolled back the entire batch. Fixed to require zero transactions of any
+  kind. Keep this in mind for any future soft-delete cleanup.
 - Budget **annual/quarterly** line items ignore the selected month entirely
   (`app.py:1221-1245`); the variables meant to bound them are computed at `app.py:1180` and
   never used. Currently latent — the active plan has none.

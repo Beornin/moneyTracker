@@ -547,13 +547,15 @@ def api_rematch_all_entities():
 
 @app.route('/api/delete_orphaned_entities', methods=['POST'])
 def delete_orphaned_entities():
-    """Delete entities that have no transactions"""
+    """Delete entities that have no transactions at all.
+
+    Soft-deleted rows still hold a non-nullable FK to their entity, so an entity whose
+    transactions are merely soft-deleted is NOT orphaned -- deleting it raises an
+    IntegrityError that rolls back the whole batch, leaving genuine orphans uncleaned.
+    """
     try:
         orphaned = Entity.query.filter(
-            ~exists().where(
-                (Transaction.entity_id == Entity.id) &
-                (Transaction.is_deleted == False)
-            )
+            ~exists().where(Transaction.entity_id == Entity.id)
         ).all()
         deleted = [e.name for e in orphaned]
         for entity in orphaned:
