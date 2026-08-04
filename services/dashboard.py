@@ -6,7 +6,10 @@ from sqlalchemy.orm import joinedload
 import plotly.graph_objects as go
 from plotly.io import to_json
 
-from constants import EXCLUDED_CAT, DASHBOARD_MONTH_SPAN, JOINT_FIDELITY_ENTITY_NAME
+from constants import (
+    EXCLUDED_CAT, DASHBOARD_MONTH_SPAN, JOINT_FIDELITY_ENTITY_NAME,
+    INTERNAL_FLOW_CATS as SHARED_INTERNAL_FLOW_CATS, INVESTMENT_INCOME_CATS,
+)
 from models import (
     db, Account, StatementRecord, Category, Transaction, Event, Entity,
     BudgetPlan, BudgetLineItem,
@@ -375,18 +378,21 @@ class DashboardService:
         are consumption-neutral and excluded entirely, never shown as a step -- matching
         how the rest of the app treats them.
 
+        Investment proceeds (IRA distributions, brokerage income) are excluded from income
+        too -- this view answers "can we live off our normal income", so a one-off rollover
+        landing in checking must not read as a huge earning month.
+
         Returns {'income': float, 'steps': [{'label', 'category_name', 'priority', 'amount'}],
         'remaining': float}. 'priority' is 'need' | 'want' | 'unclassified', resolved from
         the line item's own category, or its entity's category for entity-linked items.
         """
-        INTERNAL_FLOW_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
+        excluded_cats = {EXCLUDED_CAT} | SHARED_INTERNAL_FLOW_CATS | INVESTMENT_INCOME_CATS
         month_start = date(year, month, 1)
         month_end = date(year, month, calendar.monthrange(year, month)[1])
 
         p_txs = [t for t in self.core_transactions
                  if month_start <= t.date <= month_end
-                 and t.category.name != EXCLUDED_CAT
-                 and t.category.name not in INTERNAL_FLOW_CATS]
+                 and t.category.name not in excluded_cats]
 
         income_nets = self._net_by_entity([t for t in p_txs if t.category.type == 'Income'])
         income = float(sum(v['amount'] for v in income_nets.values() if v['amount'] > 0))

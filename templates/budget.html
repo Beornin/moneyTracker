@@ -84,6 +84,13 @@
                         <button onclick="changeWfMonth(1)" class="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"><i class="fa-solid fa-chevron-right"></i></button>
                     </div>
                 </div>
+                <div class="flex flex-wrap items-center gap-x-5 gap-y-2 mb-3 text-xs text-gray-600 dark:text-gray-400">
+                    <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm" style="background:#10b981"></span>Income</span>
+                    <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm" style="background:#6366f1"></span>Need</span>
+                    <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm" style="background:#f59e0b"></span>Want</span>
+                    <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm" style="background:#9ca3af"></span>Untagged</span>
+                    <span class="ml-auto italic">Investment income &amp; transfers excluded — normal income vs. normal spending only.</span>
+                </div>
                 <div id="wf-unclassified-notice" class="hidden mb-3 px-3 py-2 rounded-md bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 text-xs text-yellow-700 dark:text-yellow-300">
                     <i class="fa-solid fa-triangle-exclamation mr-1"></i>Some spend this month is in uncategorized categories — <button onclick="showCategorizeModal()" class="underline font-medium">tag them</button> to place it correctly.
                 </div>
@@ -318,39 +325,70 @@
             const hasUnclassified = d.steps.some(s => s.priority === 'unclassified');
             document.getElementById('wf-unclassified-notice').classList.toggle('hidden', !hasUnclassified);
 
-            const labels = ['Income', ...d.steps.map(s => s.label), 'Remaining'];
-            const measures = ['relative', ...d.steps.map(() => 'relative'), 'total'];
-            const values = [d.income, ...d.steps.map(s => -s.amount), 0];
-            const remainingColor = d.remaining >= 0 ? '#10b981' : '#ef4444';
-            const colors = ['#10b981', ...d.steps.map(s => priorityColor[s.priority] || priorityColor.unclassified), remainingColor];
-            const text = [`$${fmt(d.income)}`, ...d.steps.map(s => `-$${fmt(s.amount)} (${s.priority})`), `$${fmt(d.remaining)}`];
-
             const isDark = document.documentElement.classList.contains('dark');
             const fontColor = isDark ? '#d1d5db' : '#374151';
+            const remainingColor = d.remaining >= 0 ? '#10b981' : '#ef4444';
 
-            // Per-point marker.color drives every bar's color (Income, each Need/Want/Unclassified
-            // step, and Remaining) directly -- not Plotly's increasing/decreasing/totals categorical
-            // styling, which would only know a bar's sign, not its Need/Want meaning.
+            // Built as a go.Bar with an explicit `base` per point rather than Plotly's
+            // `waterfall` trace type: waterfall has NO top-level marker attribute, so a
+            // per-point marker.color array is silently dropped and every decreasing bar
+            // renders in one default red -- losing the Need/Want distinction entirely.
+            // A bar spans [base, base + y], so stepping `base` down the running total
+            // reproduces the waterfall shape while keeping full per-bar color control.
+            const labels = ['Income', ...d.steps.map(s => s.label), 'Remaining'];
+            const colors = ['#10b981', ...d.steps.map(s => priorityColor[s.priority] || priorityColor.unclassified), remainingColor];
+            const text = [`$${fmt(d.income)}`, ...d.steps.map(s => `-$${fmt(s.amount)}`), `$${fmt(d.remaining)}`];
+            const hover = [
+                `<b>Income</b><br>$${fmt(d.income)}<extra></extra>`,
+                ...d.steps.map(s => `<b>${s.label}</b><br>-$${fmt(s.amount)}<br>${s.priority}<extra></extra>`),
+                `<b>Remaining</b><br>$${fmt(d.remaining)}<extra></extra>`,
+            ];
+
+            const bases = [0];
+            const heights = [d.income];
+            const levels = [d.income];          // running total after each bar, for connectors
+            let cum = d.income;
+            d.steps.forEach(s => {
+                cum -= s.amount;
+                bases.push(cum);
+                heights.push(s.amount);
+                levels.push(cum);
+            });
+            bases.push(Math.min(0, d.remaining));
+            heights.push(Math.abs(d.remaining));
+
+            // Connector lines bridging the gap between consecutive bars (bar width 0.8,
+            // so the gap runs from index+0.4 to index+0.6).
+            const shapes = levels.slice(0, -1).map((lvl, i) => ({
+                type: 'line', xref: 'x', yref: 'y',
+                x0: i + 0.4, x1: i + 0.6, y0: lvl, y1: lvl,
+                line: { color: isDark ? '#4b5563' : '#d1d5db', width: 1 },
+            }));
+
             const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                measure: measures,
+                type: 'bar',
                 x: labels,
-                y: values,
+                y: heights,
+                base: bases,
                 text: text,
                 textposition: 'outside',
-                connector: { line: { color: isDark ? '#4b5563' : '#d1d5db' } },
-                marker: { color: colors },
+                textfont: { size: 10, color: fontColor },
+                cliponaxis: false,
+                hovertemplate: hover,
+                marker: { color: colors, line: { width: 0 } },
             };
 
             const layout = {
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
                 font: { color: fontColor },
-                margin: { t: 10, b: 60, l: 60, r: 10 },
-                yaxis: { title: '$', tickformat: '$,.0f' },
+                margin: { t: 30, b: 110, l: 70, r: 20 },
+                yaxis: { tickformat: '$,.0f', zeroline: true, zerolinecolor: isDark ? '#6b7280' : '#9ca3af', zerolinewidth: 1 },
+                xaxis: { tickangle: -40, automargin: true },
+                shapes: shapes,
                 showlegend: false,
                 autosize: true,
+                bargap: 0.2,
             };
 
             Plotly.newPlot('wf-chart', [trace], layout, { responsive: true, displayModeBar: false });
