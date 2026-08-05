@@ -750,13 +750,18 @@ class DashboardService:
 
         Step Up doesn't reimburse the same month the spend happens -- it pays out
         irregularly, months later. A plain per-month view hides that: this chart adds a
-        cumulative 'owed to us' line so the float building up through spring/summer (spend
-        happening, reimbursement not yet landed) and draining when a payout arrives is
-        visible, not just each month's two numbers in isolation.
+        cumulative 'unclaimed spend' line so the float building up through spring/summer
+        (spend happening, reimbursement not yet landed) and draining when a payout arrives
+        is visible, not just each month's two numbers in isolation.
+
+        Named 'unclaimed', not 'owed' -- Step Up gates reimbursement on its own available
+        account balance (refilled quarterly, not visible to this app at all) plus up to a
+        30-day approval window after a claim is submitted, so this line is an upper bound
+        on what's eventually collectible, not a real-time receivable balance.
         """
         EDU_CAT = 'Education'
 
-        # Opening balance: net owed as of the day before this window starts, so a
+        # Opening balance: net unclaimed as of the day before this window starts, so a
         # mid-year view doesn't understate the float with an artificial reset to zero.
         window_start = periods[0] if periods else date(self.display_year, 1, 1)
         prior_spend = 0.0
@@ -767,23 +772,31 @@ class DashboardService:
                     prior_spend += -float(t.amount)
                 elif t.entity.name == STEP_UP_ENTITY_NAME:
                     prior_received += float(t.amount)
-        running = prior_spend - prior_received
+        prior_offset = prior_spend - prior_received
 
-        spend_vals, received_vals, owed_vals = [], [], []
+        # Two cumulative lines, same convention as the wealth-builder / full-cashflow charts'
+        # "YTD" vs "incl. Prior Years" pair: one resets at the start of the displayed year,
+        # one carries the running balance forward from everything before it.
+        spend_vals, received_vals = [], []
+        ytd_vals, alltime_vals = [], []
+        ytd_running, alltime_running = 0.0, prior_offset
         for p_str in period_strs:
             p_txs = grouped_txs.get(p_str, [])
             edu_nets = self._net_by_entity([t for t in p_txs if t.category.name == EDU_CAT])
             spend = abs(sum(v['amount'] for v in edu_nets.values() if v['amount'] < 0))
             received = float(sum(t.amount for t in p_txs if t.entity.name == STEP_UP_ENTITY_NAME))
-            running += spend - received
+            ytd_running += spend - received
+            alltime_running += spend - received
             spend_vals.append(-spend)
             received_vals.append(received)
-            owed_vals.append(running)
+            ytd_vals.append(ytd_running)
+            alltime_vals.append(alltime_running)
 
         fig = go.Figure()
         fig.add_trace(go.Bar(name='Education Spend', x=period_strs, y=spend_vals, marker_color='#6366f1'))
         fig.add_trace(go.Bar(name='Step Up Reimbursement', x=period_strs, y=received_vals, marker_color='#10b981'))
-        fig.add_trace(go.Scatter(name='Owed to Us (cumulative)', x=period_strs, y=owed_vals, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.add_trace(go.Scatter(name='Unclaimed Education Spend (YTD)', x=period_strs, y=ytd_vals, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.add_trace(go.Scatter(name='Unclaimed Education Spend (incl. Prior Years)', x=period_strs, y=alltime_vals, mode='lines+markers', line=dict(color='#a855f7', width=3, dash='dot'), visible='legendonly'))
         fig.update_layout(
             title='Education Prepay vs. Step Up Reimbursement',
             barmode='group',
