@@ -9,7 +9,7 @@ from plotly.io import to_json
 from constants import (
     EXCLUDED_CAT, DASHBOARD_MONTH_SPAN, JOINT_FIDELITY_ENTITY_NAME,
     INTERNAL_FLOW_CATS as SHARED_INTERNAL_FLOW_CATS, INVESTMENT_INCOME_CATS,
-    BUCKET_ENTITY_NAMES,
+    BUCKET_ENTITY_NAMES, STEP_UP_ENTITY_NAME,
 )
 from models import (
     db, Account, StatementRecord, Category, Transaction, Event, Entity,
@@ -600,6 +600,7 @@ class DashboardService:
 
         return {
             'chart_wealth_builder': self._chart_wealth_builder(periods, period_strs, grouped_core, shapes, anns),
+            'chart_education_reimbursement': self._chart_education_reimbursement(periods, period_strs, grouped_core, shapes, anns),
             'chart_full_cashflow': self._chart_full_cashflow(periods, period_strs, grouped_core, shapes, anns),
             'chart_food_spending': self._chart_food_spending(periods, period_strs, grouped_core, shapes, anns),
             'chart_savings_rate': self._chart_savings_rate(periods, period_strs, grouped_core, shapes, anns),
@@ -742,6 +743,59 @@ class DashboardService:
             y_vals = [cat_data.get(m, {}).get(cat, 0) for m in period_strs]
             fig.add_trace(go.Bar(name=cat, x=period_strs, y=y_vals))
         fig.update_layout(title='Full Expenses by Category (Breakdown)', barmode='stack', yaxis=dict(title='$', tickformat="$,.0f"), xaxis=self.xaxis_date, shapes=shapes, annotations=anns, margin=self.margin_events, legend=dict(traceorder='reversed'), **self.base_layout)
+        return to_json(fig, pretty=True)
+
+    def _chart_education_reimbursement(self, periods, period_strs, grouped_txs, shapes, anns):
+        """Education spend vs. Step Up scholarship reimbursement.
+
+        Step Up doesn't reimburse the same month the spend happens -- it pays out
+        irregularly, months later. A plain per-month view hides that: this chart adds a
+        cumulative 'owed to us' line so the float building up through spring/summer (spend
+        happening, reimbursement not yet landed) and draining when a payout arrives is
+        visible, not just each month's two numbers in isolation.
+        """
+        EDU_CAT = 'Education'
+
+        # Opening balance: net owed as of the day before this window starts, so a
+        # mid-year view doesn't understate the float with an artificial reset to zero.
+        window_start = periods[0] if periods else date(self.display_year, 1, 1)
+        prior_spend = 0.0
+        prior_received = 0.0
+        for t in self.core_transactions:
+            if t.date < window_start:
+                if t.category.name == EDU_CAT and t.amount < 0:
+                    prior_spend += -float(t.amount)
+                elif t.entity.name == STEP_UP_ENTITY_NAME:
+                    prior_received += float(t.amount)
+        running = prior_spend - prior_received
+
+        spend_vals, received_vals, owed_vals = [], [], []
+        for p_str in period_strs:
+            p_txs = grouped_txs.get(p_str, [])
+            edu_nets = self._net_by_entity([t for t in p_txs if t.category.name == EDU_CAT])
+            spend = abs(sum(v['amount'] for v in edu_nets.values() if v['amount'] < 0))
+            received = float(sum(t.amount for t in p_txs if t.entity.name == STEP_UP_ENTITY_NAME))
+            running += spend - received
+            spend_vals.append(-spend)
+            received_vals.append(received)
+            owed_vals.append(running)
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(name='Education Spend', x=period_strs, y=spend_vals, marker_color='#6366f1'))
+        fig.add_trace(go.Bar(name='Step Up Reimbursement', x=period_strs, y=received_vals, marker_color='#10b981'))
+        fig.add_trace(go.Scatter(name='Owed to Us (cumulative)', x=period_strs, y=owed_vals, mode='lines+markers', line=dict(color='#f59e0b', width=3)))
+        fig.update_layout(
+            title='Education Prepay vs. Step Up Reimbursement',
+            barmode='group',
+            yaxis=dict(title='$', tickformat="$,.0f"),
+            xaxis=self.xaxis_date,
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5),
+            margin=self.margin_legend,
+            shapes=shapes,
+            annotations=anns,
+            **self.base_layout
+        )
         return to_json(fig, pretty=True)
 
     def _chart_wealth_builder(self, periods, period_strs, grouped_txs, shapes, anns):

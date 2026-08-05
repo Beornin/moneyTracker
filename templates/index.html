@@ -360,6 +360,23 @@
             </div>
         </div>
 
+        <div class="w-full mb-8">
+           <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
+                <div class="absolute top-4 left-4 z-10 tooltip-container">
+                    <i class="fa-solid fa-circle-info text-gray-400 hover:text-amber-500 cursor-pointer text-lg"></i>
+                    <span class="tooltip-text">
+                        <strong>Education Prepay vs. Step Up Reimbursement</strong> — the scholarship pays out irregularly, months after the spend it reimburses.<br>
+                        <strong>The Math:</strong><br>
+                        <span class="text-blue-400">Education Spend:</span> Education-category spend, netted per period (refunds offset).<br>
+                        <span class="text-green-400">Step Up Reimbursement:</span> payouts from the Step Up entity, as they land.<br>
+                        <span class="text-yellow-500">Owed to Us:</span> running total of spend not yet reimbursed — this is what builds up through spring/summer and drains when a payout arrives.<br>
+                        <strong>Scope:</strong> checking/credit_card accounts only, same as every other chart on this page.
+                    </span>
+                </div>
+                <div id="chart-education-reimbursement" class="w-full h-full"></div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
             
             <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 h-[600px] relative">
@@ -559,6 +576,7 @@
             
             function renderAllCharts() {
                 const plotFullCashflow      = {{ chart_full_cashflow|safe if chart_full_cashflow else 'null' }};
+                const plotEducationReimb    = {{ chart_education_reimbursement|safe if chart_education_reimbursement else 'null' }};
                 const plotWealthBuilder     = {{ chart_wealth_builder|safe if chart_wealth_builder else 'null' }};
                 const plotFoodSpending      = {{ chart_food_spending|safe if chart_food_spending else 'null' }};
                 const plotSavingsRate       = {{ chart_savings_rate|safe if chart_savings_rate else 'null' }};
@@ -576,6 +594,7 @@
 
                 renderChart(plotFullCashflow,      'chart-full-cashflow');
                 renderChart(plotWealthBuilder,     'chart-wealth-builder');
+                renderChart(plotEducationReimb,    'chart-education-reimbursement');
                 renderChart(plotTopVendors,        'chart-top-vendors');
                 renderChart(plotCategoryBreakdown, 'chart-category-breakdown');
                 renderChart(plotSavingsRate,       'chart-savings-rate');

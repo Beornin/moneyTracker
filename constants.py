@@ -20,6 +20,11 @@ EXCLUDED_PAYEE_LABELS_CORE = []
 # pulling from the joint account is the one that matters for household cash flow.
 JOINT_FIDELITY_ENTITY_NAME = 'Joint Fidelity'
 
+# Homeschool scholarship (Step Up For Students). Pays out irregularly, months after the
+# qualifying Education spend it reimburses -- the lag is what the "Education Prepay vs
+# Reimbursement" chart visualizes.
+STEP_UP_ENTITY_NAME = 'Step Up'
+
 # Categories representing money moving between our own accounts / into investments
 # rather than being consumed. Wealth-building, not spending.
 INTERNAL_FLOW_CATS = {'Savings Transfer', 'Investment Transfer', 'Investment', 'VUL'}
